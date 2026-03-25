@@ -3,34 +3,28 @@ const CLIENT_SECRET = process.env.CA_CLIENT_SECRET;
 const REDIRECT_URI  = process.env.CA_REDIRECT_URI;
 const TOKEN_URL     = "https://auth.contaazul.com/oauth2/token";
 
-async function saveTokenToEnv(payload) {
-  const projectId = process.env.VERCEL_PROJECT_ID;
-  const teamId    = process.env.VERCEL_TEAM_ID || "";
-  const apiToken  = process.env.VERCEL_API_TOKEN;
-  if (!projectId || !apiToken) { console.warn("Env vars ausentes"); return false; }
-  const encoded   = Buffer.from(JSON.stringify(payload)).toString("base64");
-  const teamParam = teamId ? `?teamId=${teamId}` : "";
+const GITHUB_OWNER = "kauehenriquefo89-design";
+const GITHUB_REPO  = "painel-ninho";
+const GITHUB_FILE  = "data/token.json";
+const GITHUB_API   = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_FILE}`;
+
+async function saveTokenToGitHub(payload) {
+  const ghToken = process.env.GITHUB_TOKEN;
+  if (!ghToken) return false;
+  let sha = null;
   try {
-    let resp = await fetch(`https://api.vercel.com/v10/projects/${projectId}/env${teamParam}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiToken}` },
-      body: JSON.stringify({ key: "CA_TOKEN_DATA", value: encoded, type: "encrypted", target: ["production","preview","development"] }),
+    const r = await fetch(GITHUB_API, { headers: { "Authorization": `Bearer ${ghToken}`, "Accept": "application/vnd.github+json" } });
+    if (r.ok) { const f = await r.json(); sha = f.sha; }
+  } catch {}
+  const content = Buffer.from(JSON.stringify(payload)).toString("base64");
+  try {
+    const body = { message: "Atualiza token CA", content, ...(sha ? { sha } : {}) };
+    const resp = await fetch(GITHUB_API, {
+      method: "PUT",
+      headers: { "Authorization": `Bearer ${ghToken}`, "Accept": "application/vnd.github+json", "Content-Type": "application/json" },
+      body: JSON.stringify(body)
     });
-    if (resp.status === 409) {
-      const list = await (await fetch(`https://api.vercel.com/v10/projects/${projectId}/env${teamParam}`, {
-        headers: { "Authorization": `Bearer ${apiToken}` }
-      })).json();
-      const ex = (list.envs || []).find(e => e.key === "CA_TOKEN_DATA");
-      if (ex) {
-        resp = await fetch(`https://api.vercel.com/v10/projects/${projectId}/env/${ex.id}${teamParam}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiToken}` },
-          body: JSON.stringify({ value: encoded }),
-        });
-      }
-    }
-    console.log("Token salvo:", resp.ok);
-    return resp.ok;
+    return resp.ok || resp.status === 201;
   } catch (e) { console.error(e.message); return false; }
 }
 
@@ -58,7 +52,7 @@ module.exports = async (req, res) => {
       expires_at:    Date.now() + (tokens.expires_in || 3600) * 1000,
     };
 
-    await saveTokenToEnv(payload);
+    await saveTokenToGitHub(payload);
 
     const encoded = Buffer.from(JSON.stringify(payload)).toString("base64");
     res.setHeader("Set-Cookie", `ca_token=${encoded}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`);
