@@ -6,6 +6,7 @@
   },
   "routes": [
     { "src": "/api/callback", "dest": "/api/callback.js" },
+    { "src": "/api/store",    "dest": "/api/store.js" },
     { "src": "/api/(.*)",     "dest": "/api/api.js" },
     { "src": "/(.*)",         "dest": "/index.html" }
   ]
