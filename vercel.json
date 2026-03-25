@@ -1,0 +1,12 @@
+{
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 30
+    }
+  },
+  "routes": [
+    { "src": "/api/callback", "dest": "/api/callback.js" },
+    { "src": "/api/(.*)",     "dest": "/api/api.js" },
+    { "src": "/(.*)",         "dest": "/index.html" }
+  ]
+}
