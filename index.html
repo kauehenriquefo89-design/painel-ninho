@@ -970,6 +970,7 @@ function renderDRE(){
   const toggleBar=`<div class="dre-toggle">
     <button class="dre-tb${DRE_MODE==="normal"?" a":""}" onclick="setDreMode('normal')">📊 DRE</button>
     <button class="dre-tb${DRE_MODE==="cc"?" a":""}" onclick="setDreMode('cc')">🏢 Centro de Custo</button>
+    <button class="dre-tb" onclick="exportDRE()" style="margin-left:auto;background:#22c55e;color:#fff;border-color:transparent;font-size:11px">⬇ Excel</button>
   </div>`;
 
   if(DRE_MODE==="cc"){el.innerHTML=toggleBar+renderDREbyCostCenter(d);return;}
@@ -1390,6 +1391,77 @@ function renderDREbyCostCenter(d){
   </tbody></table></div></div>`;
 }
 
+window.exportDRE=function(){
+  if(!APP){alert("Carregue os dados primeiro.");return;}
+  const meses=MESES_SEL.length>0?MESES_SEL:(CUR_MES!=="TOTAL"?[CUR_MES]:MESES);
+  const wb=window.XLSX.utils.book_new();
+  const fmtN=v=>v!=null&&!isNaN(v)?Math.round(v):"";
+  const fmtP=v=>v!=null&&!isNaN(v)?+(v*100).toFixed(1):"";
+  const getDRELines=(d,mesLabel)=>{
+    if(!d)return[];
+    const rb=d.rb_excel||d.rl||0;
+    const imp=d.impostos||{pis:0,cofins:0,iss:0,csll:0,irpj:0,adicional:0};
+    const deducoes=(imp.pis||0)+(imp.cofins||0)+(imp.iss||0);
+    const desc=d.desc_excel||0;
+    const rl_liq=d.rl-deducoes;
+    const rep=d.rep||0;
+    const mb=rl_liq-rep;
+    const dc=d.desp_comercial||0,da=d.desp_admin||0;
+    const ebitda=mb-dc-da;
+    const rf=(d.rendimentos||0)-(d.desp_financeiro||0);
+    const ebt=ebitda+rf;
+    const csll_irpj=(imp.csll||0)+(imp.irpj||0)+(imp.adicional||0);
+    const ll=ebt-csll_irpj;
+    const av=v=>rb>0?fmtP(v/rb):"";
+    const ln=(label,v,tipo)=>({"Mes":mesLabel,"Linha":label,"Valor":fmtN(v),"AV%":av(v),"Tipo":tipo||""});
+    const br=()=>({"Mes":"","Linha":"","Valor":"","AV%":"","Tipo":""});
+    const rows=[];
+    rows.push(ln("01 RECEITA BRUTA",rb,"principal"));
+    (d.categorias||[]).forEach(c=>rows.push(ln("  >> "+c.n,c.faturado,"sub")));
+    rows.push(ln("02 DEDUCOES DA RECEITA BRUTA",-(deducoes+desc),"principal"));
+    if(desc>0)rows.push(ln("  >> Descontos Concedidos",-desc,"sub"));
+    rows.push(ln("  >> PIS 0,65%",-(imp.pis||0),"sub"));
+    rows.push(ln("  >> COFINS 3,0%",-(imp.cofins||0),"sub"));
+    rows.push(ln("  >> ISS 5,0%",-(imp.iss||0),"sub"));
+    rows.push(ln("= RECEITA LIQUIDA",rl_liq,"resultado"));
+    rows.push(br());
+    rows.push(ln("03 REPASSES",-rep,"principal"));
+    (d.cpCategorias||[]).filter(c=>c.grupo==="repasse").forEach(c=>rows.push(ln("  >> "+c.n,-c.valor,"sub")));
+    rows.push(ln("= MARGEM BRUTA",mb,"resultado"));
+    rows.push(br());
+    rows.push(ln("04.1 DESPESAS COMERCIAIS",-dc,"principal"));
+    (d.cpCategorias||[]).filter(c=>c.grupo==="comercial").forEach(c=>rows.push(ln("  >> "+c.n,-c.valor,"sub")));
+    rows.push(ln("04.2 DESPESAS ADMINISTRATIVAS",-da,"principal"));
+    (d.cpCategorias||[]).filter(c=>c.grupo==="administrativo").forEach(c=>rows.push(ln("  >> "+c.n,-c.valor,"sub")));
+    rows.push(ln("= EBITDA",ebitda,"resultado"));
+    rows.push(br());
+    rows.push(ln("05 RESULTADO FINANCEIRO",rf,"principal"));
+    (d.cpCategorias||[]).filter(c=>c.grupo==="rendimento").forEach(c=>rows.push(ln("  >> "+c.n,c.valor,"sub")));
+    (d.cpCategorias||[]).filter(c=>c.grupo==="financeiro").forEach(c=>rows.push(ln("  >> "+c.n,-c.valor,"sub")));
+    rows.push(ln("= EBT (ANTES DOS IMPOSTOS)",ebt,"resultado"));
+    rows.push(br());
+    rows.push(ln("CSLL / IRPJ (provisao)",-csll_irpj,"principal"));
+    rows.push(ln("  >> CSLL 9%/3",-(imp.csll||0),"sub"));
+    rows.push(ln("  >> IRPJ 15%/3",-(imp.irpj||0),"sub"));
+    rows.push(ln("  >> IRPJ Adicional",-(imp.adicional||0),"sub"));
+    rows.push(br());
+    rows.push(ln("= LUCRO LIQUIDO",ll,"resultado"));
+    return rows;
+  };
+  const allRows=[];
+  meses.forEach(m=>{
+    allRows.push(...getDRELines(APP.byMes[m],m));
+    allRows.push({"Mes":"","Linha":"---","Valor":"","AV%":"","Tipo":""});
+  });
+  if(meses.length>1){
+    allRows.push(...getDRELines(getActiveData(),"TOTAL"));
+  }
+  const ws=window.XLSX.utils.json_to_sheet(allRows,{header:["Mes","Linha","Valor","AV%","Tipo"]});
+  ws["!cols"]=[{wch:10},{wch:50},{wch:16},{wch:8},{wch:10}];
+  window.XLSX.utils.book_append_sheet(wb,ws,"DRE");
+  const periodo=meses.length>1?meses[0]+"_a_"+meses[meses.length-1]:(meses[0]||"total");
+  window.XLSX.writeFile(wb,"DRE_Espaco_Ninho_"+periodo+".xlsx");
+};
 window.setDreMode=function(mode){DRE_MODE=mode;renderDRE()};
 window.dreToggleMes=function(m){
   const i=MESES_SEL.indexOf(m);
