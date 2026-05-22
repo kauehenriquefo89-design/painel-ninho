@@ -175,7 +175,8 @@ function calcImpostos(rb){
 
 // ── DRE CATEGORY GROUPING (based on real Conta Azul categories) ──
 function getGrupoCp(cat) {
-  const c = (cat||"").toLowerCase();
+  const c = (cat||"").toLowerCase().trim();
+  if (c==="pis"||c==="cofins"||c==="iss"||c==="csll"||c==="irpj"||c==="irpj adicional") return "imposto";
   if (c.includes("repasse")) return "repasse";
   if (c.includes("marketing") || c.includes("publicidade") || c.includes("brinde") || c.includes("comerci")) return "comercial";
   if (c.includes("rendimento") || c.includes("aplicacao") || c.includes("aplicação")) return "rendimento";
@@ -705,18 +706,22 @@ function processData(){
     const _isPIS   =c=>catNorm2(c.cat)==="pis";
     const _isCOFINS=c=>catNorm2(c.cat)==="cofins";
     const _isISS   =c=>catNorm2(c.cat)==="iss";
+    const _isCSLL  =c=>catNorm2(c.cat)==="csll";
+    const _isIRPJ  =c=>catNorm2(c.cat)==="irpj"||catNorm2(c.cat)==="irpj adicional";
     const pisPago   =cpM.filter(_isPIS).reduce((a,r)=>a+r.original,0);
     const cofinsPago=cpM.filter(_isCOFINS).reduce((a,r)=>a+r.original,0);
     const issPago   =cpM.filter(_isISS).reduce((a,r)=>a+r.original,0);
-    if(pisPago||cofinsPago||issPago) console.log(`[${mes}] ✅ PIS=${pisPago} COFINS=${cofinsPago} ISS=${issPago}`);
-    else if(cpM.length) console.log(`[${mes}] ❌ Não encontrou | cats:`, [...new Set(cpM.map(r=>r.cat))].join(", "));
+    const csllPago  =cpM.filter(_isCSLL).reduce((a,r)=>a+r.original,0);
+    const irpjPago  =cpM.filter(_isIRPJ).reduce((a,r)=>a+r.original,0);
 
     const imp=calcImpostos(rl);
     const pisFinal   =pisPago>0    ? pisPago    : imp.pis;
     const cofinsFinal=cofinsPago>0 ? cofinsPago : imp.cofins;
     const issFinal   =issPago>0    ? issPago    : imp.iss;
-    const impFinal={...imp, pis:pisFinal, cofins:cofinsFinal, iss:issFinal};
-    impFinal.total=pisFinal+cofinsFinal+issFinal+impFinal.csll+impFinal.irpj+impFinal.adicional;
+    const csllFinal  =csllPago>0   ? csllPago   : imp.csll;
+    const irpjFinal  =irpjPago>0   ? irpjPago   : imp.irpj;
+    const impFinal={...imp, pis:pisFinal, cofins:cofinsFinal, iss:issFinal, csll:csllFinal, irpj:irpjFinal};
+    impFinal.total=pisFinal+cofinsFinal+issFinal+csllFinal+irpjFinal+impFinal.adicional;
     const deducoes=pisFinal+cofinsFinal+issFinal;
     const rl_liq=rl-deducoes;                  // Receita Líquida (após impostos s/ faturamento)
     const margem_bruta=rl_liq-rep;             // Margem Bruta (era "lucro_bruto")
