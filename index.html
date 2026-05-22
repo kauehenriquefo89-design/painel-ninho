@@ -225,18 +225,30 @@ function recalcQuarterlyTax(byMes, allMeses){
     const tri=calcCsllIrpj(rb_trim);
     const n=meses.length;
 
+    // Se algum mês do trimestre tem valor real do CA → zera provisão dos demais
+    const anyCSLLreal=meses.some(m=>byMes[m]?.impostos?.csllFromCA);
+    const anyIRPJreal=meses.some(m=>byMes[m]?.impostos?.irpjFromCA);
     meses.forEach(mes=>{
       const d=byMes[mes];if(!d)return;
-      // Atualiza provisão mensal = trimestral / nº meses com dados
-      d.impostos.csll=tri.csll/n;
-      d.impostos.irpj=tri.irpj/n;
+      if(anyCSLLreal){
+        // Zera provisão nos meses sem lançamento real; mantém o real no mês com lançamento
+        if(!d.impostos.csllFromCA) d.impostos.csll=0;
+      } else {
+        d.impostos.csll=tri.csll/n;
+      }
+      if(anyIRPJreal){
+        if(!d.impostos.irpjFromCA) d.impostos.irpj=0;
+      } else {
+        d.impostos.irpj=tri.irpj/n;
+      }
       d.impostos.adicional=tri.adicional/n;
       d.impostos.total=d.impostos.pis+d.impostos.cofins+d.impostos.iss+d.impostos.csll+d.impostos.irpj+d.impostos.adicional;
       d.impostos.base_presumida=tri.base;
       d.impostos.rb_trimestral=rb_trim;
       d.impostos.trimestre=q;
       // Recalcula Lucro Líquido com imposto correto
-      const csll_irpj=d.impostos.csll+d.impostos.irpj+d.impostos.adicional;
+      d.impostos.total=d.impostos.pis+d.impostos.cofins+d.impostos.iss+d.impostos.csll+d.impostos.irpj+(d.impostos.adicional||0);
+      const csll_irpj=d.impostos.csll+d.impostos.irpj+(d.impostos.adicional||0);
       d.ll=d.ebt-csll_irpj;
     });
   });
