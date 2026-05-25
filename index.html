@@ -731,6 +731,7 @@ function processData(){
     const csllPago  =cpM.filter(_isCSLL).reduce((a,r)=>a+r.original,0);
     const irpjPago     =cpM.filter(_isIRPJ).reduce((a,r)=>a+r.original,0);
     const irpjAdicPago =cpM.filter(_isIRPJAdic).reduce((a,r)=>a+r.original,0);
+    if(mes==="2026-03"){const irpjCats=cpM.filter(c=>catNorm2(c.cat).includes("irpj")).map(c=>c.cat+"="+c.original);console.log("[adic debug 2026-03] irpj cats:",irpjCats,"| adicPago:",irpjAdicPago);}
 
     const imp=calcImpostos(rl);
     const pisFinal   =pisPago>0    ? pisPago    : imp.pis;
