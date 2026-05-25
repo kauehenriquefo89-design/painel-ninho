@@ -241,7 +241,8 @@ function recalcQuarterlyTax(byMes, allMeses){
       } else {
         d.impostos.irpj=tri.irpj/n;
       }
-      if(anyAdicReal){
+      // IRPJ Adicional: zera nos outros meses se houver IRPJ real OU adicional real no trimestre
+      if(anyAdicReal||anyIRPJreal){
         if(!d.impostos.adicFromCA) d.impostos.adicional=0;
       } else {
         d.impostos.adicional=tri.adicional/n;
@@ -731,7 +732,7 @@ function processData(){
     const csllPago  =cpM.filter(_isCSLL).reduce((a,r)=>a+r.original,0);
     const irpjPago     =cpM.filter(_isIRPJ).reduce((a,r)=>a+r.original,0);
     const irpjAdicPago =cpM.filter(_isIRPJAdic).reduce((a,r)=>a+r.original,0);
-    if(mes==="2026-03"){console.log("[2026-03 ALL cats]",[...new Set(cpM.map(r=>r.cat))].join(" | "));}
+
 
     const imp=calcImpostos(rl);
     const pisFinal   =pisPago>0    ? pisPago    : imp.pis;
