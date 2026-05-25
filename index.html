@@ -732,9 +732,7 @@ function processData(){
     const issFinal   =issPago>0    ? issPago    : imp.iss;
     const csllFinal  =csllPago>0   ? csllPago   : imp.csll;
     const irpjFinal  =irpjPago>0   ? irpjPago   : imp.irpj;
-    if(csllPago||irpjPago)console.log(`[${mes}] CA real: CSLL=${csllPago} IRPJ=${irpjPago}`);
-    else console.log(`[${mes}] Sem CSLL/IRPJ real. Cats cpM:`, [...new Set(cpM.map(r=>r.cat))].filter(c=>/(csll|irpj|imposto)/i.test(c)).join(","));
-    const impFinal={...imp, pis:pisFinal, cofins:cofinsFinal, iss:issFinal, csll:csllFinal, irpj:irpjFinal};
+    const impFinal={...imp, pis:pisFinal, cofins:cofinsFinal, iss:issFinal, csll:csllFinal, irpj:irpjFinal, csllFromCA:csllPago>0, irpjFromCA:irpjPago>0};
     impFinal.total=pisFinal+cofinsFinal+issFinal+csllFinal+irpjFinal+impFinal.adicional;
     const deducoes=pisFinal+cofinsFinal+issFinal;
     const rl_liq=rl-deducoes;                  // Receita Líquida (após impostos s/ faturamento)
