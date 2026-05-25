@@ -228,10 +228,10 @@ function recalcQuarterlyTax(byMes, allMeses){
     // Se algum mês do trimestre tem valor real do CA → zera provisão dos demais
     const anyCSLLreal=meses.some(m=>byMes[m]?.impostos?.csllFromCA);
     const anyIRPJreal=meses.some(m=>byMes[m]?.impostos?.irpjFromCA);
+    const anyAdicReal=meses.some(m=>byMes[m]?.impostos?.adicFromCA);
     meses.forEach(mes=>{
       const d=byMes[mes];if(!d)return;
       if(anyCSLLreal){
-        // Zera provisão nos meses sem lançamento real; mantém o real no mês com lançamento
         if(!d.impostos.csllFromCA) d.impostos.csll=0;
       } else {
         d.impostos.csll=tri.csll/n;
@@ -240,6 +240,11 @@ function recalcQuarterlyTax(byMes, allMeses){
         if(!d.impostos.irpjFromCA) d.impostos.irpj=0;
       } else {
         d.impostos.irpj=tri.irpj/n;
+      }
+      if(anyAdicReal){
+        if(!d.impostos.adicFromCA) d.impostos.adicional=0;
+      } else {
+        d.impostos.adicional=tri.adicional/n;
       }
       d.impostos.adicional=tri.adicional/n;
       d.impostos.total=d.impostos.pis+d.impostos.cofins+d.impostos.iss+d.impostos.csll+d.impostos.irpj+d.impostos.adicional;
@@ -719,12 +724,14 @@ function processData(){
     const _isCOFINS=c=>catNorm2(c.cat)==="cofins";
     const _isISS   =c=>catNorm2(c.cat)==="iss";
     const _isCSLL  =c=>catNorm2(c.cat)==="csll";
-    const _isIRPJ  =c=>catNorm2(c.cat)==="irpj"||catNorm2(c.cat)==="irpj adicional";
+    const _isIRPJ      =c=>catNorm2(c.cat)==="irpj";
+    const _isIRPJAdic  =c=>catNorm2(c.cat)==="irpj adicional";
     const pisPago   =cpM.filter(_isPIS).reduce((a,r)=>a+r.original,0);
     const cofinsPago=cpM.filter(_isCOFINS).reduce((a,r)=>a+r.original,0);
     const issPago   =cpM.filter(_isISS).reduce((a,r)=>a+r.original,0);
     const csllPago  =cpM.filter(_isCSLL).reduce((a,r)=>a+r.original,0);
-    const irpjPago  =cpM.filter(_isIRPJ).reduce((a,r)=>a+r.original,0);
+    const irpjPago     =cpM.filter(_isIRPJ).reduce((a,r)=>a+r.original,0);
+    const irpjAdicPago =cpM.filter(_isIRPJAdic).reduce((a,r)=>a+r.original,0);
 
     const imp=calcImpostos(rl);
     const pisFinal   =pisPago>0    ? pisPago    : imp.pis;
@@ -732,7 +739,9 @@ function processData(){
     const issFinal   =issPago>0    ? issPago    : imp.iss;
     const csllFinal  =csllPago>0   ? csllPago   : imp.csll;
     const irpjFinal  =irpjPago>0   ? irpjPago   : imp.irpj;
-    const impFinal={...imp, pis:pisFinal, cofins:cofinsFinal, iss:issFinal, csll:csllFinal, irpj:irpjFinal, csllFromCA:csllPago>0, irpjFromCA:irpjPago>0};
+    const irpjAdicFinal=irpjAdicPago>0 ? irpjAdicPago : imp.adicional;
+    const impFinal={...imp, pis:pisFinal, cofins:cofinsFinal, iss:issFinal, csll:csllFinal, irpj:irpjFinal, adicional:irpjAdicFinal,
+      csllFromCA:csllPago>0, irpjFromCA:irpjPago>0, adicFromCA:irpjAdicPago>0};
     impFinal.total=pisFinal+cofinsFinal+issFinal+csllFinal+irpjFinal+impFinal.adicional;
     const deducoes=pisFinal+cofinsFinal+issFinal;
     const rl_liq=rl-deducoes;                  // Receita Líquida (após impostos s/ faturamento)
