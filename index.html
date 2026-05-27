@@ -1269,108 +1269,153 @@ function renderDREMulti(meses, hasExcel){
 
 
 function renderDREbyCostCenter(d){
-  // ── RECEITA: Excel (coluna Procedimento = Centro de Custo) ───────────────
-  const ccMap={};
-  const mesesAtivos = getActiveMeses();
+  if(!APP) return splashHTML();
+  const hasExcel=!!XL_DATA, hasCA=!!CA_DATA;
 
-  // Filtra atRows pelo período ativo (considera MESES_SEL da DRE)
-  const atRows = (APP?.atRows||[]).filter(r=>{
-    if(!r.mes)return false;
-    // DRE multi-select
-    if(MESES_SEL.length>0)return MESES_SEL.includes(r.mes);
-    if(CUR_MES!=="TOTAL"&&!dtFrom&&!dtTo)return r.mes===CUR_MES;
-    if(dtFrom&&r.mes<dtFrom)return false;
-    if(dtTo&&r.mes>dtTo)return false;
+  // ── PERÍODO ATIVO ────────────────────────────────────────────────────────
+  const inPeriod=m=>{
+    if(!m)return false;
+    if(MESES_SEL.length>0)return MESES_SEL.includes(m);
+    if(CUR_MES!=="TOTAL"&&!dtFrom&&!dtTo)return m===CUR_MES;
+    if(dtFrom&&m<dtFrom)return false;
+    if(dtTo&&m>dtTo)return false;
     return true;
+  };
+
+  // ── TOTAIS DRE (fonte única de verdade) ──────────────────────────────────
+  const imp=d.impostos||{pis:0,cofins:0,iss:0,csll:0,irpj:0,adicional:0};
+  const rb_total   = d.rb_excel||d.rl||0;
+  const rl_total   = d.rl||0;
+  const ded_total  = (imp.pis||0)+(imp.cofins||0)+(imp.iss||0);
+  const desc_total = d.desc_excel||0;
+  const rl_liq_total = rl_total - ded_total;
+  const rep_total  = d.rep||0;
+  const mb_total   = rl_liq_total - rep_total;
+  const dc_total   = d.desp_comercial||0;
+  const da_total   = d.desp_admin||0;
+  const ebitda_total = mb_total - dc_total - da_total;
+  const rend_total = d.rendimentos||0;
+  const fin_total  = d.desp_financeiro||0;
+  const rf_total   = rend_total - fin_total;
+  const ebt_total  = ebitda_total + rf_total;
+  const csll_irpj_total = (imp.csll||0)+(imp.irpj||0)+(imp.adicional||0);
+  const ll_total   = ebt_total - csll_irpj_total;
+
+  // ── RECEITA POR CC (Excel — col. Procedimento) ──────────────────────────
+  const ccMap={};
+  const addCC=n=>{if(!ccMap[n])ccMap[n]={n,rb:0,rl:0,rep:0,dc:0,da:0,rend:0,fin:0};};
+
+  (APP.atRows||[]).filter(r=>inPeriod(r.mes)).forEach(r=>{
+    const n=(r.disc||"Sem Procedimento");
+    addCC(n);
+    ccMap[n].rb+=(r.rb||0);
+    ccMap[n].rl+=(r.rl||0);
   });
 
-  // Agrupa receita por Procedimento (col. C do Excel)
-  atRows.forEach(r=>{
-    const n=r.disc||"Sem Procedimento";
-    if(!ccMap[n])ccMap[n]={n,rb:0,rl:0,rep:0,desp_admin:0,desp_comercial:0,desp_fin:0,rend:0,emp:0};
-    ccMap[n].rb+=r.rb||0;
-    ccMap[n].rl+=r.rl||0;
-  });
-
-  // ── REPASSE + DESPESAS + RES. FIN.: Conta Azul (CC do sistema, competência) ──
+  // ── REPASSES E DESPESAS POR CC (Conta Azul — por competência) ────────────
   (CA_DATA?.cp||[]).forEach(item=>{
     const mes=toYYYYMM(item.data_competencia);
-    if(!mes)return;
-    if(MESES_SEL.length>0&&!MESES_SEL.includes(mes))return;
-    else if(MESES_SEL.length===0){
-      if(CUR_MES!=="TOTAL"&&!dtFrom&&!dtTo&&mes!==CUR_MES)return;
-      if(dtFrom&&mes<dtFrom)return;
-      if(dtTo&&mes>dtTo)return;
-    }
-
-    const grupo=getGrupoCp(item.categorias?.[0]?.nome||item.descricao||"");
+    if(!inPeriod(mes))return;
+    const cat=item.categorias?.[0]?.nome||item.descricao||"";
+    const grupo=getGrupoCp(cat);
+    if(grupo==="imposto")return; // impostos distribuídos proporcionalmente depois
     const val=toNum(item.total||0);
-
-    // Usa centros_de_custo do CA quando disponível
-    const ccs=item.centros_de_custo&&item.centros_de_custo.length
-      ? item.centros_de_custo
-      : [{nome:"Sem Centro de Custo"}];
-
+    const ccs=item.centros_de_custo?.length?item.centros_de_custo:[{nome:"Sem Centro de Custo"}];
     ccs.forEach(cc=>{
       const n=cc.nome||"Sem Centro de Custo";
-      // Para repasses: associa ao CC do CA
-      // Para despesas adm/comercial/fin: distribui ao CC do CA
-      if(!ccMap[n])ccMap[n]={n,rb:0,rl:0,rep:0,desp_admin:0,desp_comercial:0,desp_fin:0,rend:0,emp:0};
-      if(grupo==="repasse")ccMap[n].rep+=val;
-      else if(grupo==="comercial")ccMap[n].desp_comercial+=val;
-      else if(grupo==="financeiro")ccMap[n].desp_fin+=val;
-      else if(grupo==="rendimento")ccMap[n].rend+=val;
-      else if(grupo==="emprestimo")ccMap[n].emp+=val;
-      else ccMap[n].desp_admin+=val;
+      addCC(n);
+      if(grupo==="repasse")          ccMap[n].rep+=val;
+      else if(grupo==="comercial")   ccMap[n].dc+=val;
+      else if(grupo==="rendimento")  ccMap[n].rend+=val;
+      else if(grupo==="financeiro")  ccMap[n].fin+=val;
+      else if(grupo==="emprestimo")  {} // ignorado na DRE
+      else                           ccMap[n].da+=val;
     });
   });
 
-  const ccs=Object.values(ccMap).sort((a,b)=>b.rb-a.rb);
-  if(!ccs.length)return`<div class="no-data">Nenhum dado encontrado.<br>
-    <span style="font-size:11px;color:var(--muted)">Conecte o Excel para ver receita por procedimento e o Conta Azul para ver custos por centro de custo.</span></div>`;
+  // ── CÁLCULOS POR CC ──────────────────────────────────────────────────────
+  const ccs=Object.values(ccMap);
 
-  const totRb=ccs.reduce((a,c)=>a+c.rb,0);
-
-  // Recalcula CSLL/IRPJ trimestral para o total
-  const totalMeses = mesesAtivos.length || 1;
-  const rb_trim = totRb * (3 / totalMeses); // aproxima trimestre
-  const imp_tot = calcCsllIrpj(rb_trim);
-
-  const rows=ccs.map(cc=>{
-    const ded=calcDeducoesFiscais(cc.rl);
-    const rl_liq=cc.rl-ded.total;
-    const lb=rl_liq-cc.rep;
-    const lo=lb-cc.desp_comercial-cc.desp_admin;
-    const rf=cc.rend-cc.desp_fin;
-    const ebt=lo+rf-cc.emp;
-    // Provisão de imposto proporcional à receita do CC
-    const proporcao=totRb>0?cc.rb/totRb:0;
-    const csll_irpj=(imp_tot.csll+imp_tot.irpj+imp_tot.adicional)/totalMeses*proporcao;
-    const ll=ebt-csll_irpj;
-    return{...cc,ded:ded.total,rl_liq,lb,lo,rf,ebt,ll,csll_irpj};
+  // Deduções proporcionais ao rl de cada CC (mesma base da DRE)
+  ccs.forEach(cc=>{
+    const prop=rl_total>0?cc.rl/rl_total:0;
+    cc.ded   = ded_total*prop;               // PIS+COFINS+ISS proporcional
+    cc.rl_liq= cc.rl - cc.ded;              // consistente com DRE
+    cc.mb    = cc.rl_liq - cc.rep;
+    cc.desp_op= cc.dc + cc.da;
+    cc.ebitda = cc.mb - cc.desp_op;
+    cc.rf    = cc.rend - cc.fin;
+    cc.ebt   = cc.ebitda + cc.rf;
+    // CSLL/IRPJ proporcional ao rb de cada CC
+    cc.csll_irpj = rb_total>0?(csll_irpj_total*cc.rb/rb_total):0;
+    cc.ll    = cc.ebt - cc.csll_irpj;
   });
 
-  // Totais
-  const tot=rows.reduce((a,r)=>({
-    rb:a.rb+r.rb, ded:a.ded+r.ded, rl_liq:a.rl_liq+r.rl_liq,
-    rep:a.rep+r.rep, lb:a.lb+r.lb, desp_admin:a.desp_admin+r.desp_admin,
-    desp_comercial:a.desp_comercial+r.desp_comercial, lo:a.lo+r.lo,
-    rf:a.rf+r.rf, ebt:a.ebt+r.ebt, csll_irpj:a.csll_irpj+r.csll_irpj, ll:a.ll+r.ll
-  }),{rb:0,ded:0,rl_liq:0,rep:0,lb:0,desp_admin:0,desp_comercial:0,lo:0,rf:0,ebt:0,csll_irpj:0,ll:0});
+  // ── AJUSTE RECONCILIAÇÃO (garante que total CC = total DRE) ─────────────
+  // Diferença de repasses, despesas e RF vai para "Sem Centro de Custo"
+  const sumCC=k=>ccs.reduce((a,c)=>a+(c[k]||0),0);
+  const semCC=ccMap["Sem Centro de Custo"]||(addCC("Sem Centro de Custo"),ccMap["Sem Centro de Custo"]);
 
-  const hasExcel=atRows.length>0;
-  const hasCA=!!CA_DATA;
+  const diffRep=rep_total - sumCC("rep");
+  const diffDC =dc_total  - sumCC("dc");
+  const diffDA =da_total  - sumCC("da");
+  const diffRF =rf_total  - (sumCC("rend")-sumCC("fin"));
+
+  if(Math.abs(diffRep)>0.5) semCC.rep+=diffRep;
+  if(Math.abs(diffDC)>0.5)  semCC.dc+=diffDC;
+  if(Math.abs(diffDA)>0.5)  semCC.da+=diffDA;
+  if(Math.abs(diffRF)>0.5)  {semCC.rend+=diffRF>0?diffRF:0; semCC.fin+=diffRF<0?-diffRF:0;}
+
+  // Recalcula Sem CC
+  semCC.mb    =semCC.rl_liq-semCC.rep;
+  semCC.desp_op=semCC.dc+semCC.da;
+  semCC.ebitda=semCC.mb-semCC.desp_op;
+  semCC.rf    =semCC.rend-semCC.fin;
+  semCC.ebt   =semCC.ebitda+semCC.rf;
+  semCC.csll_irpj=rb_total>0?(csll_irpj_total*semCC.rb/rb_total):0;
+  semCC.ll    =semCC.ebt-semCC.csll_irpj;
+
+  // Ordena: maior receita primeiro, sem CC no final
+  const sorted=ccs.filter(c=>c.n!=="Sem Centro de Custo").sort((a,b)=>b.rb-a.rb);
+  if(ccMap["Sem Centro de Custo"])sorted.push(ccMap["Sem Centro de Custo"]);
+
+  // ── LINHA DE TOTAL ────────────────────────────────────────────────────────
+  const tot={n:"TOTAL",rb:rb_total,rl:rl_total,ded:ded_total,rl_liq:rl_liq_total,
+    rep:rep_total,mb:mb_total,desp_op:dc_total+da_total,ebitda:ebitda_total,
+    rf:rf_total,ebt:ebt_total,csll_irpj:csll_irpj_total,ll:ll_total};
+
+  if(!sorted.length) return`<div class="no-data">Nenhum dado encontrado.<br>
+    <span style="font-size:11px;color:var(--muted)">Conecte Excel e Conta Azul.</span></div>`;
+
+  // ── RENDERIZAÇÃO ──────────────────────────────────────────────────────────
+  const fRow=(c,isTot)=>`<tr style="${isTot?"background:var(--hover);font-weight:700;border-top:2px solid var(--border)":""}">
+    <td class="b" style="font-size:${isTot?12:11}px">${c.n}</td>
+    <td class="r mn">${fR(c.rb)}</td>
+    <td class="r mn" style="color:var(--red)">${c.ded?fR(-c.ded):""}</td>
+    <td class="r mn">${fR(c.rl_liq)}</td>
+    <td class="r mn" style="color:var(--red)">${c.rep?fR(-c.rep):""}</td>
+    <td class="r mn b" style="color:${clr(c.mb)}">${fR(c.mb)}</td>
+    <td class="r" style="font-size:10px">${bdg(c.rb>0?c.mb/c.rb:0)}</td>
+    <td class="r mn" style="color:var(--red)">${c.desp_op?fR(-c.desp_op):""}</td>
+    <td class="r mn b" style="color:${clr(c.ebitda)}">${fR(c.ebitda)}</td>
+    <td class="r" style="font-size:10px">${bdg(c.rb>0?c.ebitda/c.rb:0)}</td>
+    <td class="r mn" style="color:${clr(c.rf)}">${fR(c.rf)}</td>
+    <td class="r mn b" style="color:${clr(c.ebt)}">${fR(c.ebt)}</td>
+    <td class="r mn" style="color:var(--muted)">${c.csll_irpj?fR(-c.csll_irpj):""}</td>
+    <td class="r mn b" style="color:${clr(c.ll)}">${fR(c.ll)}</td>
+    <td class="r" style="font-size:10px">${bdg(c.rb>0?c.ll/c.rb:0)}</td>
+  </tr>`;
 
   return`
-  <div class="src-info">📊 Receita: ${hasExcel?"Excel · col. Procedimento":"⚠ Excel não conectado"} · Repasses e Despesas: ${hasCA?"Conta Azul · centro de custo · competência":"⚠ Conta Azul não conectado"}</div>
-  <div class="panel"><div class="pt">DRE por Centro de Custo</div>
-  <div class="tw" style="overflow-x:auto"><table><thead><tr>
-    <th>Centro de Custo</th>
+  <div class="src-info">📊 Receita: ${hasExcel?"Excel · col. Procedimento":"⚠ Requer Excel"} · Custos: ${hasCA?"Conta Azul · competência":"⚠ Requer Conta Azul"} · Totais reconciliados com a DRE</div>
+  <div class="panel"><div class="tw" style="overflow-x:auto">
+  <table id="tbl-cc" style="width:100%;min-width:900px"><thead><tr>
+    <th style="min-width:160px">Centro de Custo</th>
     <th class="r">Rec.Bruta</th>
     <th class="r">Deduções</th>
     <th class="r">Rec.Líquida</th>
     <th class="r">Repasse</th>
-    <th class="r">Margem Bruta</th>
+    <th class="r">Mg.Bruta</th>
     <th class="r">%MB</th>
     <th class="r">Desp.Op.</th>
     <th class="r">EBITDA</th>
@@ -1381,114 +1426,12 @@ function renderDREbyCostCenter(d){
     <th class="r">Lucro Líq.</th>
     <th class="r">%LL</th>
   </tr></thead><tbody>
-  ${rows.map(c=>`<tr>
-    <td class="b">${c.n}</td>
-    <td class="r mn">${fR(c.rb)}</td>
-    <td class="r mn rd">${fR(-c.ded)}</td>
-    <td class="r mn">${fR(c.rl_liq)}</td>
-    <td class="r mn rd">${fR(-c.rep)}</td>
-    <td class="r mn b" style="color:${clr(c.lb)}">${fR(c.lb)}</td>
-    <td class="r">${bdg(c.rb>0?c.lb/c.rb:0)}</td>
-    <td class="r mn rd">${fR(-(c.desp_admin+c.desp_comercial))}</td>
-    <td class="r mn b" style="color:${clr(c.lo)}">${fR(c.lo)}</td>
-    <td class="r">${bdg(c.rb>0?c.lo/c.rb:0)}</td>
-    <td class="r mn" style="color:${clr(c.rf)}">${fR(c.rf)}</td>
-    <td class="r mn b" style="color:${clr(c.ebt)}">${fR(c.ebt)}</td>
-    <td class="r mn" style="color:var(--muted)">${fR(-c.csll_irpj)}</td>
-    <td class="r mn b" style="color:${clr(c.ll)}">${fR(c.ll)}</td>
-    <td class="r">${bdg(c.rb>0?c.ll/c.rb:0)}</td>
-  </tr>`).join("")}
-  <tr style="background:var(--hover);font-weight:700;border-top:2px solid var(--border)">
-    <td class="b">TOTAL</td>
-    <td class="r mn">${fR(tot.rb)}</td>
-    <td class="r mn rd">${fR(-tot.ded)}</td>
-    <td class="r mn">${fR(tot.rl_liq)}</td>
-    <td class="r mn rd">${fR(-tot.rep)}</td>
-    <td class="r mn b" style="color:${clr(tot.lb)}">${fR(tot.lb)}</td>
-    <td class="r">${bdg(tot.rb>0?tot.lb/tot.rb:0)}</td>
-    <td class="r mn rd">${fR(-(tot.desp_admin+tot.desp_comercial))}</td>
-    <td class="r mn b" style="color:${clr(tot.lo)}">${fR(tot.lo)}</td>
-    <td class="r">${bdg(tot.rb>0?tot.lo/tot.rb:0)}</td>
-    <td class="r mn" style="color:${clr(tot.rf)}">${fR(tot.rf)}</td>
-    <td class="r mn b" style="color:${clr(tot.ebt)}">${fR(tot.ebt)}</td>
-    <td class="r mn" style="color:var(--muted)">${fR(-tot.csll_irpj)}</td>
-    <td class="r mn b" style="color:${clr(tot.ll)}">${fR(tot.ll)}</td>
-    <td class="r">${bdg(tot.rb>0?tot.ll/tot.rb:0)}</td>
-  </tr>
+  ${sorted.map(c=>fRow(c,false)).join("")}
+  ${fRow(tot,true)}
   </tbody></table></div></div>`;
 }
 
-window.exportDRE=function(){
-  if(!APP){alert("Carregue os dados primeiro.");return;}
-  const meses=MESES_SEL.length>0?MESES_SEL:(CUR_MES!=="TOTAL"?[CUR_MES]:MESES);
-  const wb=window.XLSX.utils.book_new();
-  const fmtN=v=>v!=null&&!isNaN(v)?Math.round(v):"";
-  const fmtP=v=>v!=null&&!isNaN(v)?+(v*100).toFixed(1):"";
-  const getDRELines=(d,mesLabel)=>{
-    if(!d)return[];
-    const rb=d.rb_excel||d.rl||0;
-    const imp=d.impostos||{pis:0,cofins:0,iss:0,csll:0,irpj:0,adicional:0};
-    const deducoes=(imp.pis||0)+(imp.cofins||0)+(imp.iss||0);
-    const desc=d.desc_excel||0;
-    const rl_liq=d.rl-deducoes;
-    const rep=d.rep||0;
-    const mb=rl_liq-rep;
-    const dc=d.desp_comercial||0,da=d.desp_admin||0;
-    const ebitda=mb-dc-da;
-    const rf=(d.rendimentos||0)-(d.desp_financeiro||0);
-    const ebt=ebitda+rf;
-    const csll_irpj=(imp.csll||0)+(imp.irpj||0)+(imp.adicional||0);
-    const ll=ebt-csll_irpj;
-    const av=v=>rb>0?fmtP(v/rb):"";
-    const ln=(label,v,tipo)=>({"Mes":mesLabel,"Linha":label,"Valor":fmtN(v),"AV%":av(v),"Tipo":tipo||""});
-    const br=()=>({"Mes":"","Linha":"","Valor":"","AV%":"","Tipo":""});
-    const rows=[];
-    rows.push(ln("01 RECEITA BRUTA",rb,"principal"));
-    (d.categorias||[]).forEach(c=>rows.push(ln("  >> "+c.n,c.faturado,"sub")));
-    rows.push(ln("02 DEDUCOES DA RECEITA BRUTA",-(deducoes+desc),"principal"));
-    if(desc>0)rows.push(ln("  >> Descontos Concedidos",-desc,"sub"));
-    rows.push(ln("  >> PIS 0,65%",-(imp.pis||0),"sub"));
-    rows.push(ln("  >> COFINS 3,0%",-(imp.cofins||0),"sub"));
-    rows.push(ln("  >> ISS 5,0%",-(imp.iss||0),"sub"));
-    rows.push(ln("= RECEITA LIQUIDA",rl_liq,"resultado"));
-    rows.push(br());
-    rows.push(ln("03 REPASSES",-rep,"principal"));
-    (d.cpCategorias||[]).filter(c=>c.grupo==="repasse").forEach(c=>rows.push(ln("  >> "+c.n,-c.valor,"sub")));
-    rows.push(ln("= MARGEM BRUTA",mb,"resultado"));
-    rows.push(br());
-    rows.push(ln("04.1 DESPESAS COMERCIAIS",-dc,"principal"));
-    (d.cpCategorias||[]).filter(c=>c.grupo==="comercial").forEach(c=>rows.push(ln("  >> "+c.n,-c.valor,"sub")));
-    rows.push(ln("04.2 DESPESAS ADMINISTRATIVAS",-da,"principal"));
-    (d.cpCategorias||[]).filter(c=>c.grupo==="administrativo").forEach(c=>rows.push(ln("  >> "+c.n,-c.valor,"sub")));
-    rows.push(ln("= EBITDA",ebitda,"resultado"));
-    rows.push(br());
-    rows.push(ln("05 RESULTADO FINANCEIRO",rf,"principal"));
-    (d.cpCategorias||[]).filter(c=>c.grupo==="rendimento").forEach(c=>rows.push(ln("  >> "+c.n,c.valor,"sub")));
-    (d.cpCategorias||[]).filter(c=>c.grupo==="financeiro").forEach(c=>rows.push(ln("  >> "+c.n,-c.valor,"sub")));
-    rows.push(ln("= EBT (ANTES DOS IMPOSTOS)",ebt,"resultado"));
-    rows.push(br());
-    rows.push(ln("CSLL / IRPJ (provisao)",-csll_irpj,"principal"));
-    rows.push(ln("  >> CSLL 9%/3",-(imp.csll||0),"sub"));
-    rows.push(ln("  >> IRPJ 15%/3",-(imp.irpj||0),"sub"));
-    rows.push(ln("  >> IRPJ Adicional",-(imp.adicional||0),"sub"));
-    rows.push(br());
-    rows.push(ln("= LUCRO LIQUIDO",ll,"resultado"));
-    return rows;
-  };
-  const allRows=[];
-  meses.forEach(m=>{
-    allRows.push(...getDRELines(APP.byMes[m],m));
-    allRows.push({"Mes":"","Linha":"---","Valor":"","AV%":"","Tipo":""});
-  });
-  if(meses.length>1){
-    allRows.push(...getDRELines(getActiveData(),"TOTAL"));
-  }
-  const ws=window.XLSX.utils.json_to_sheet(allRows,{header:["Mes","Linha","Valor","AV%","Tipo"]});
-  ws["!cols"]=[{wch:10},{wch:50},{wch:16},{wch:8},{wch:10}];
-  window.XLSX.utils.book_append_sheet(wb,ws,"DRE");
-  const periodo=meses.length>1?meses[0]+"_a_"+meses[meses.length-1]:(meses[0]||"total");
-  window.XLSX.writeFile(wb,"DRE_Espaco_Ninho_"+periodo+".xlsx");
-};
+
 window.setDreMode=function(mode){DRE_MODE=mode;renderDRE()};
 window.dreToggleMes=function(m){
   const i=MESES_SEL.indexOf(m);
