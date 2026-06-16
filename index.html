@@ -381,7 +381,7 @@ function normalizarCR(item){
   // Fluxo de Caixa: data_vencimento (regime de caixa, separado da DRE)
   const mesFC=toYYYYMM(item.data_vencimento);
   if(!mes)return null; // descarta lançamentos sem data de competência
-  const cliente=item.contato?.nome||item.nome_contato||"Sem identificação";
+  const cliente=item.cliente?.nome||item.cliente?.razao_social||item.contato?.nome||"Sem identificação";
   return{mes,mesFC,cat,faturado,recebido,aberto:faturado-recebido,cliente};
 }
 function normalizarCP(item){
