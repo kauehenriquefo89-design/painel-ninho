@@ -135,9 +135,13 @@ async function fetchFinancialData(access_token) {
   const startVencAmplo = new Date(now.getFullYear() - 1, 0, 1);  // Jan ano anterior
   const endVencAmplo   = new Date(now.getFullYear() + 1, 11, 31); // Dez próximo ano
 
+  // Estende competência até 12 meses à frente para capturar lançamentos futuros
+  // A filtragem por período é feita no cliente (normalizarCP/CR)
+  const fimCompFuturo = new Date(now.getFullYear(), now.getMonth() + 12, 0);
+
   const params = {
     data_competencia_de:  fmt(start),
-    data_competencia_ate: fmt(fimMesAtual),   // fim do mês atual, não hoje
+    data_competencia_ate: fmt(fimCompFuturo),  // 12 meses à frente para incluir previsões
     data_vencimento_de:   fmt(startVencAmplo),
     data_vencimento_ate:  fmt(endVencAmplo),
   };
