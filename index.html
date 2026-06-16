@@ -188,6 +188,26 @@ function calcImpostos(rb){
   return{pis:ded.pis,cofins:ded.cofins,iss:ded.iss,csll:tri.csll/3,irpj:tri.irpj/3,adicional:tri.adicional/3,total:ded.total+tri.total/3};
 }
 
+// ── NORMALIZADORES PARA FLUXO DE CAIXA PREVISTO (itens futuros) ─────────────
+function normalizarCRfuture(item){
+  if(isTransfer(item))return null;
+  const aberto=toNum(item.total||0)-toNum(item.pago||0);
+  if(aberto<=0)return null; // só itens em aberto
+  const mes=toYYYYMM(item.data_vencimento);
+  if(!mes)return null;
+  return{mes,faturado:aberto,recebido:0,aberto};
+}
+function normalizarCPfuture(item){
+  if(isTransfer(item))return null;
+  const cat=(item.categorias?.[0]?.nome||item.descricao||"");
+  if(getGrupoCp(cat)==="imposto")return null;
+  const aberto=toNum(item.total||0)-toNum(item.pago||0);
+  if(aberto<=0)return null;
+  const mes=toYYYYMM(item.data_vencimento);
+  if(!mes)return null;
+  return{mes,cat,pago:0,original:aberto,aberto};
+}
+
 // ── DRE CATEGORY GROUPING (based on real Conta Azul categories) ──
 function getGrupoCp(cat) {
   const c = (cat||"").toLowerCase().trim();
@@ -921,9 +941,11 @@ function processData(){
         mo++;if(mo>12){mo=1;y++;}
         const ms=y+"-"+String(mo).padStart(2,"0");
         if(fcData.find(r=>r.mes===ms))continue;
-        // Tenta usar lançamentos futuros do CA (vencimento > hoje)
-        const caE=crFC.filter(r=>r.mes===ms&&r.mes>hoje).reduce((a,r)=>a+(r.recebido||r.faturado||0),0);
-        const caS=cpFC.filter(r=>r.mes===ms&&r.mes>hoje).reduce((a,r)=>a+(r.pago||r.original||0),0);
+        // Tenta usar lançamentos futuros do CA (valor em aberto no vencimento)
+        const crFut=CA_DATA?(CA_DATA.cr||[]).map(normalizarCRfuture).filter(r=>r&&r.mes===ms):[];
+        const cpFut=CA_DATA?(CA_DATA.cp||[]).map(normalizarCPfuture).filter(r=>r&&r.mes===ms):[];
+        const caE=crFut.reduce((a,r)=>a+r.aberto,0);
+        const caS=cpFut.reduce((a,r)=>a+r.aberto,0);
         let e,s,fonte;
         if(caE>0||caS>0){
           // Usa dados reais do CA para meses futuros já lançados
