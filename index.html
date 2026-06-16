@@ -88,6 +88,21 @@ td.rd{color:var(--red)}td.gn{color:var(--green)}
 </style>
 </head>
 <body>
+<div id="auth-wall" style="display:flex;position:fixed;inset:0;background:#fdf6f0;z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:16px;padding:40px;box-shadow:0 4px 24px rgba(0,0,0,.12);max-width:340px;width:90%;text-align:center">
+    <div style="font-size:36px;margin-bottom:8px">🪹</div>
+    <div style="font-size:20px;font-weight:700;color:#C4622D;margin-bottom:4px">Espaço Ninho</div>
+    <div style="font-size:13px;color:#999;margin-bottom:28px">Dashboard Financeiro</div>
+    <input id="auth-pwd" type="password" placeholder="Senha de acesso"
+      style="width:100%;padding:12px 14px;border:1.5px solid #e5d5cc;border-radius:8px;font-size:14px;outline:none;margin-bottom:12px;box-sizing:border-box"
+      onkeydown="if(event.key==='Enter')checkAuth()"/>
+    <button onclick="checkAuth()"
+      style="width:100%;padding:12px;background:#C4622D;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:8px">
+      Entrar
+    </button>
+    <div id="auth-err" style="color:#e53e3e;font-size:12px;margin-top:4px;display:none">Senha incorreta. Tente novamente.</div>
+  </div>
+</div>
 <div id="hdr">
   <div id="hdr-top">
     <div id="brand-wrap">
@@ -895,25 +910,35 @@ function processData(){
       return{m:monthLabel(m),mes:m,e,s,sm,ac:acum,fonte:"ca"};
     });
   }
-  // Projeção: média móvel dos últimos 3 meses reais para cada mês projetado
+  // Projeção: CA real (vencimentos futuros) ou média móvel se não houver
   if(fcData.length){
     const reais=fcData.filter(r=>!r.projecao&&r.e>0);
+    const hoje=new Date().toISOString().slice(0,7);
     if(reais.length>0){
       let[y,mo]=fcData[fcData.length-1].mes.split("-").map(Number),ac2=fcData[fcData.length-1].ac;
-      // Buffer de meses reais que cresce a cada projeção adicionada
       const buffer=[...reais];
       for(let i=0;i<6;i++){
         mo++;if(mo>12){mo=1;y++;}
         const ms=y+"-"+String(mo).padStart(2,"0");
         if(fcData.find(r=>r.mes===ms))continue;
-        // Média dos últimos 3 meses disponíveis (reais + projetados anteriores)
-        const ultimos3=buffer.slice(-3);
-        const avgE=ultimos3.reduce((a,r)=>a+r.e,0)/ultimos3.length;
-        const avgS=ultimos3.reduce((a,r)=>a+r.s,0)/ultimos3.length;
-        const sm=avgE-avgS;ac2+=sm;
-        const novo={m:monthLabel(ms),mes:ms,e:avgE,s:avgS,sm,ac:ac2,projecao:true};
+        // Tenta usar lançamentos futuros do CA (vencimento > hoje)
+        const caE=crFC.filter(r=>r.mes===ms&&r.mes>hoje).reduce((a,r)=>a+(r.recebido||r.faturado||0),0);
+        const caS=cpFC.filter(r=>r.mes===ms&&r.mes>hoje).reduce((a,r)=>a+(r.pago||r.original||0),0);
+        let e,s,fonte;
+        if(caE>0||caS>0){
+          // Usa dados reais do CA para meses futuros já lançados
+          e=caE; s=caS; fonte="ca_prev";
+        } else {
+          // Fallback: média móvel dos últimos 3 meses
+          const ultimos3=buffer.slice(-3);
+          e=ultimos3.reduce((a,r)=>a+r.e,0)/ultimos3.length;
+          s=ultimos3.reduce((a,r)=>a+r.s,0)/ultimos3.length;
+          fonte="media";
+        }
+        const sm=e-s; ac2+=sm;
+        const novo={m:monthLabel(ms),mes:ms,e,s,sm,ac:ac2,projecao:true,fonte};
         fcData.push(novo);
-        buffer.push(novo); // adiciona ao buffer para próxima iteração
+        buffer.push(novo);
       }
     }
   }
@@ -1627,7 +1652,7 @@ function renderFluxo(){
   <div class="panel"><div class="pt">Detalhamento — Realizado (valores quitados/recebidos)</div>
   <div class="tw"><table><thead><tr><th>Mês</th><th class="r">Recebido</th><th class="r">Pago</th><th class="r">Saldo Mensal</th><th class="r">Saldo Acum.</th><th class="r">Tipo</th></tr></thead><tbody>
   <tr style="background:#f5f1ef;font-weight:700"><td class="b">Dez/25 (saldo inicial)</td><td class="r mn" colspan="3" style="color:var(--muted)">—</td><td class="r mn b" style="color:var(--brand)">${fR(SALDO_INICIAL_DEZ)}</td><td class="r"><span class="bdg bg">Inicial</span></td></tr>
-  ${fc.map(r=>`<tr style="${r.projecao?"opacity:.75":""}"><td class="b">${r.m}${r.fonte==="ofx"?' <span style="font-size:9px;color:var(--green)">🏦</span>':r.fonte==="ca"?' <span style="font-size:9px;color:var(--muted)">CA</span>':''}</td><td class="r mn gn">${fR(r.e)}</td><td class="r mn rd">${fR(r.s)}</td><td class="r mn b" style="color:${clr(r.sm)}">${fR(r.sm)}</td><td class="r mn b" style="color:${r.ac>=0?'var(--green)':'var(--red)'}">${fR(r.ac)}</td><td class="r"><span class="bdg ${r.projecao?"bo":r.sm>=0?"bg":"br"}">${r.projecao?"📊 Proj.":r.sm>=0?"✓ Ok":"⚠ Neg."}</span></td></tr>`).join("")}
+  ${fc.map(r=>`<tr style="${r.projecao?"opacity:.75":""}"><td class="b">${r.m}${r.fonte==="ofx"?' <span style="font-size:9px;color:var(--green)">🏦</span>':r.fonte==="ca_prev"?' <span style="font-size:9px;color:var(--brand)">📋 CA</span>':r.fonte==="ca"?' <span style="font-size:9px;color:var(--muted)">CA</span>':''}</td><td class="r mn gn">${fR(r.e)}</td><td class="r mn rd">${fR(r.s)}</td><td class="r mn b" style="color:${clr(r.sm)}">${fR(r.sm)}</td><td class="r mn b" style="color:${r.ac>=0?'var(--green)':'var(--red)'}">${fR(r.ac)}</td><td class="r"><span class="bdg ${r.projecao?"bo":r.sm>=0?"bg":"br"}">${r.projecao?"📊 Proj.":r.sm>=0?"✓ Ok":"⚠ Neg."}</span></td></tr>`).join("")}
   </tbody></table></div></div>`;
 }
 
@@ -1805,7 +1830,37 @@ async function loadCA(isRefresh){
   }catch(e){console.error(e);isLoadingCA=false;updateSyncBadge(false);if(!isRefresh){const el=document.getElementById("sec-dre");if(el)el.innerHTML=`<div class="err-box"><b>Erro:</b> ${e.message}</div>`;}}
 }
 function startPollingCA(){if(pollTimer)clearInterval(pollTimer);pollTimer=setInterval(()=>loadCA(true),POLL_MS);}
+// ── AUTENTICAÇÃO ──────────────────────────────────────────────────────────
+// Para alterar a senha: substitua "Ninho@2026" nas duas ocorrências abaixo
+window.checkAuth=function(){
+  const v=document.getElementById("auth-pwd").value;
+  if(v==="Ninho@2026#"){
+    document.getElementById("auth-wall").style.display="none";
+    sessionStorage.setItem("nh_auth","1");
+    document.getElementById("auth-pwd").value="";
+  } else {
+    document.getElementById("auth-err").style.display="block";
+    document.getElementById("auth-pwd").value="";
+    document.getElementById("auth-pwd").focus();
+  }
+};
+
 (async()=>{
+  // Verifica autenticação antes de carregar
+  if(sessionStorage.getItem("nh_auth")!=="1"){
+    document.getElementById("auth-wall").style.display="flex";
+    document.getElementById("auth-pwd").focus();
+    // Aguarda senha
+    await new Promise(resolve=>{
+      const orig=window.checkAuth;
+      window.checkAuth=function(){
+        orig();
+        if(sessionStorage.getItem("nh_auth")==="1")resolve();
+      };
+    });
+  } else {
+    document.getElementById("auth-wall").style.display="none";
+  }
   buildMesBar();render();
   const params=new URLSearchParams(location.search);
   if(params.toString())history.replaceState({},"","/");
