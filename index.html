@@ -381,7 +381,8 @@ function normalizarCR(item){
   // Fluxo de Caixa: data_vencimento (regime de caixa, separado da DRE)
   const mesFC=toYYYYMM(item.data_vencimento);
   if(!mes)return null; // descarta lançamentos sem data de competência
-  return{mes,mesFC,cat,faturado,recebido,aberto:faturado-recebido};
+  const cliente=item.contato?.nome||item.nome_contato||"Sem identificação";
+  return{mes,mesFC,cat,faturado,recebido,aberto:faturado-recebido,cliente};
 }
 function normalizarCP(item){
   if(isTransfer(item))return null;
@@ -1679,24 +1680,121 @@ function renderFluxo(){
 }
 
 function renderInadimp(){
-  const el=document.getElementById("sec-inadimp");if(!APP){el.innerHTML=splashHTML();return;}
-  const d=getActiveData();const cats=d.categoriasCA||d.categorias||[]; // usa CA para faturado/recebido/aberto corretos
-  const totF=cats.reduce((a,c)=>a+c.faturado,0),totA=cats.reduce((a,c)=>a+c.aberto,0),taxa=totF>0?totA/totF:0;
-  el.innerHTML=`
-  <div class="src-info">⚠ Fonte: Conta Azul (Contas a Receber por competência) · Em Aberto = Total Faturado – Recebido</div>
-  <div class="cards">
-    ${kCard("Total Faturado",fR(totF),"","var(--blue)","")}
-    ${kCard("Total Recebido",fR(totF-totA),fP(totF>0?(totF-totA)/totF:0),"var(--green)","")}
-    ${kCard("Total em Aberto",fR(totA),"","var(--red)","")}
-    ${kCard("Taxa Inadimplência",fP(taxa),"","var(--red)",taxa>0.1?"⚠ Acima de 10%":"✓ Normal")}
-  </div>
-  <div class="panel"><div class="pt">Em Aberto por Categoria</div>
-  <div class="cwrap">${barH(cats.filter(c=>c.aberto>0).slice(0,14).map((c,i)=>({l:c.n,v:c.aberto,c:"var(--red)"})),520)}</div></div>
-  <div class="panel"><div class="tw"><table id="tbl-inadimp"><thead><tr>
-    ${thSort("tbl-inadimp",0,"Categoria","")}${thSort("tbl-inadimp",1,"Faturado","r")}${thSort("tbl-inadimp",2,"Recebido","r")}${thSort("tbl-inadimp",3,"Em Aberto","r")}${thSort("tbl-inadimp",4,"% Inadimp.","r")}
+  const el=document.getElementById("sec-inadimp");
+  if(!APP){el.innerHTML=splashHTML();return;}
+  const d=getActiveData();
+  if(!d){el.innerHTML=splashHTML();return;}
+
+  const crRows=(APP.crRows||[]).filter(r=>{
+    if(!r.mes)return false;
+    if(MESES_SEL.length>0)return MESES_SEL.includes(r.mes);
+    if(CUR_MES!=="TOTAL"&&!dtFrom&&!dtTo)return r.mes===CUR_MES;
+    if(dtFrom&&r.mes<dtFrom)return false;
+    if(dtTo&&r.mes>dtTo)return false;
+    return true;
+  }).filter(r=>r.faturado>0);
+
+  if(!crRows.length){
+    el.innerHTML=`<div class="no-data">Nenhum dado de inadimplência no período.<br><span style="font-size:11px;color:var(--muted)">Conecte o Conta Azul.</span></div>`;
+    return;
+  }
+
+  // Agrupa por categoria
+  const byCat={};
+  crRows.forEach(r=>{
+    const n=r.cat||"Sem categoria";
+    if(!byCat[n])byCat[n]={n,faturado:0,recebido:0,aberto:0};
+    byCat[n].faturado+=r.faturado;
+    byCat[n].recebido+=r.recebido;
+    byCat[n].aberto+=r.aberto;
+  });
+
+  // Agrupa por cliente (só inadimplentes)
+  const byCliente={};
+  crRows.filter(r=>r.aberto>0).forEach(r=>{
+    const n=r.cliente||"Sem identificação";
+    if(!byCliente[n])byCliente[n]={n,faturado:0,recebido:0,aberto:0};
+    byCliente[n].faturado+=r.faturado;
+    byCliente[n].recebido+=r.recebido;
+    byCliente[n].aberto+=r.aberto;
+  });
+
+  const cats=Object.values(byCat).sort((a,b)=>b.faturado-a.faturado);
+  const clientes=Object.values(byCliente).sort((a,b)=>b.aberto-a.aberto);
+
+  const totF=crRows.reduce((a,r)=>a+r.faturado,0);
+  const totR=crRows.reduce((a,r)=>a+r.recebido,0);
+  const totA=crRows.reduce((a,r)=>a+r.aberto,0);
+  const txInadGeral=totF>0?totA/totF:0;
+
+  // KPIs
+  const kpis=`<div class="cards">
+    ${kCard("Total Faturado",fR(totF),"","var(--blue)","Período")}
+    ${kCard("Total Recebido",fR(totR),fP(totF>0?totR/totF:0),"var(--green)","Período")}
+    ${kCard("Em Aberto",fR(totA),fP(txInadGeral),"var(--red)","Inadimplência")}
+    ${kCard("Clientes Inadimplentes",clientes.length+" clientes","","var(--muted)","Com saldo em aberto")}
+  </div>`;
+
+  // Gráfico de barras por categoria
+  const chartData=cats.filter(c=>c.aberto>0).sort((a,b)=>b.aberto-a.aberto).map(c=>({l:c.n,v:c.aberto}));
+  const chart=chartData.length?`<div class="panel"><div class="pt">Em Aberto por Categoria</div>
+    <div class="cwrap">${barH(chartData,520,24,160)}</div></div>`:"";
+
+  // Tabela por categoria
+  const tblCat=`
+  <div class="panel"><div class="pt">Faturado vs Recebido por Categoria</div>
+  <div class="tw"><table id="tbl-inadimp" style="width:100%">
+  <thead><tr>
+    ${thSort("tbl-inadimp",0,"Categoria","")}
+    ${thSort("tbl-inadimp",1,"Faturado","r")}
+    ${thSort("tbl-inadimp",2,"Recebido","r")}
+    ${thSort("tbl-inadimp",3,"Em Aberto","r")}
+    ${thSort("tbl-inadimp",4,"% Inadimp.","r")}
   </tr></thead><tbody>
-  ${cats.map(c=>`<tr><td class="b">${c.n}</td><td class="r mn">${fR(c.faturado)}</td><td class="r mn gn">${fR(c.recebido)}</td><td class="r mn rd b">${fR(c.aberto)}</td><td class="r"><span class="bdg ${c.faturado>0&&c.aberto/c.faturado<0.1?"bg":c.faturado>0&&c.aberto/c.faturado<0.3?"by":"br"}">${fP(c.faturado>0?c.aberto/c.faturado:0)}</span></td></tr>`).join("")}
+  ${cats.map(c=>{
+    const tx=c.faturado>0?c.aberto/c.faturado:0;
+    return`<tr>
+      <td class="b">${c.n}</td>
+      <td class="r mn">${fR(c.faturado)}</td>
+      <td class="r mn gn">${fR(c.recebido)}</td>
+      <td class="r mn" style="color:${c.aberto>0?"var(--red)":"var(--green)"}">${fR(c.aberto)}</td>
+      <td class="r">${bdg(tx,"inv")}</td>
+    </tr>`;
+  }).join("")}
+  <tr style="background:var(--hover);font-weight:700;border-top:2px solid var(--border)">
+    <td class="b">TOTAL</td>
+    <td class="r mn">${fR(totF)}</td>
+    <td class="r mn gn">${fR(totR)}</td>
+    <td class="r mn rd">${fR(totA)}</td>
+    <td class="r">${bdg(txInadGeral,"inv")}</td>
+  </tr>
   </tbody></table></div></div>`;
+
+  // Tabela clientes inadimplentes
+  const tblClientes=clientes.length?`
+  <div class="panel"><div class="pt">⚠ Clientes com Saldo em Aberto (${clientes.length})</div>
+  <div class="tw"><table id="tbl-inadimp-cli" style="width:100%">
+  <thead><tr>
+    ${thSort("tbl-inadimp-cli",0,"Cliente","")}
+    ${thSort("tbl-inadimp-cli",1,"Faturado","r")}
+    ${thSort("tbl-inadimp-cli",2,"Recebido","r")}
+    ${thSort("tbl-inadimp-cli",3,"Em Aberto","r")}
+    ${thSort("tbl-inadimp-cli",4,"% Inadimp.","r")}
+  </tr></thead><tbody>
+  ${clientes.map(c=>{
+    const tx=c.faturado>0?c.aberto/c.faturado:0;
+    return`<tr>
+      <td class="b">${c.n}</td>
+      <td class="r mn">${fR(c.faturado)}</td>
+      <td class="r mn gn">${fR(c.recebido)}</td>
+      <td class="r mn rd">${fR(c.aberto)}</td>
+      <td class="r">${bdg(tx,"inv")}</td>
+    </tr>`;
+  }).join("")}
+  </tbody></table></div></div>`:"";
+
+  el.innerHTML=`<div class="src-info">⚠ Inadimplência: Conta Azul (competência) · Em Aberto = Faturado − Recebido</div>
+  ${kpis}${chart}${tblClientes}`;
 }
 
 function renderImpostos(){
