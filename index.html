@@ -1018,7 +1018,6 @@ let DRE_MODE = "normal";
 // Sort state per table: {tableId: {col, dir}}
 const SORT_STATE={};
 function sortTable(tableId, col, dir){
-  // Toggle: if same col already sorted asc → go desc, otherwise asc
   const cur=SORT_STATE[tableId]||{};
   const actualDir=(cur.col===col&&cur.dir==="asc")?"desc":"asc";
   SORT_STATE[tableId]={col,dir:actualDir};
@@ -1026,6 +1025,27 @@ function sortTable(tableId, col, dir){
   const tbl=document.getElementById(tableId);
   if(!tbl)return;
   const tbody=tbl.querySelector("tbody");
+  // For prof table: sort only main rows, keep sub-rows attached
+  const isProfTable=tableId==="tbl-prof";
+  if(isProfTable){
+    const mainRows=[...tbody.querySelectorAll("tr.prof-main")];
+    mainRows.sort((a,b)=>{
+      const ca=a.cells[col]?.dataset?.v||a.cells[col]?.textContent?.replace(/[R$.()\s%▲▼]/g,"")||"0";
+      const cb=b.cells[col]?.dataset?.v||b.cells[col]?.textContent?.replace(/[R$.()\s%▲▼]/g,"")||"0";
+      const na=parseFloat(ca)||0,nb=parseFloat(cb)||0;
+      const sa=isNaN(parseFloat(ca))?ca:null,sb=isNaN(parseFloat(cb))?cb:null;
+      if(sa!==null&&sb!==null)return actualDir==="asc"?sa.localeCompare(sb,"pt-BR"):sb.localeCompare(sa,"pt-BR");
+      return actualDir==="asc"?na-nb:nb-na;
+    });
+    mainRows.forEach(mainRow=>{
+      const pid=mainRow.dataset.pid;
+      tbody.appendChild(mainRow);
+      // Move sub-rows right after their parent
+      [...tbody.querySelectorAll(`.prof-sub-${pid}`)].forEach(sub=>tbody.appendChild(sub));
+    });
+    tbl.querySelectorAll("th.sort-th").forEach((th,i)=>{th.classList.remove("asc","desc");if(i===col)th.classList.add(actualDir);});
+    return;
+  }
   const rows=[...tbody.querySelectorAll("tr")];
   const idx=col;
   rows.sort((a,b)=>{
@@ -1563,14 +1583,13 @@ window.exportDRE=function(){
   const periodo=meses.length>1?meses[0]+"_a_"+meses[meses.length-1]:(meses[0]||"total");
   window.XLSX.writeFile(wb,"DRE_Espaco_Ninho_"+periodo+".xlsx");
 };
-window.toggleProfDrill=function(name){
-  const id=name.replace(/\s/g,"_");
-  const sub=document.getElementById("prof-sub-"+id);
-  const row=document.getElementById("prof-row-"+id);
-  if(!sub)return;
-  const open=sub.style.display==="none";
-  sub.style.display=open?"table-row-group":"none";
-  if(row){const td=row.querySelector("td");if(td)td.innerHTML=(open?"▼ ":"▶ ")+name;}
+window.toggleProfDrill=function(pid){
+  const subs=document.querySelectorAll(".prof-sub-"+pid);
+  const ico=document.getElementById("ico-p-"+pid);
+  if(!subs.length)return;
+  const open=subs[0].style.display==="none";
+  subs.forEach(r=>r.style.display=open?"table-row":"none");
+  if(ico)ico.textContent=open?"▼":"▶";
 };
 window.setDreMode=function(mode){DRE_MODE=mode;renderDRE()};
 window.dreToggleMes=function(m){
@@ -1617,62 +1636,70 @@ function renderTicket(){
 function renderProf(){
   const el=document.getElementById("sec-prof");
   if(!APP){el.innerHTML=splashHTML();return;}
-  if(!XL_DATA){el.innerHTML=`<div class="excel-needed">📊 <b>Conecte o Excel</b> para atualizar</div>`;return;}
+  if(!XL_DATA){el.innerHTML=`<div class="excel-needed">📊 <b>Conecte o Excel</b></div>`;return;}
 
-  // Obtém dados do período ativo
   const meses=MESES_SEL.length>0?MESES_SEL:(CUR_MES!=="TOTAL"?[CUR_MES]:MESES);
   const allProfs=[];
-  meses.forEach(m=>{
-    const d=APP.byMes[m];
-    if(d?.profissionais)allProfs.push(...d.profissionais);
-  });
+  meses.forEach(m=>{const d=APP.byMes[m];if(d?.profissionais)allProfs.push(...d.profissionais);});
   if(!allProfs.length){const d=getActiveData();if(d?.profissionais)allProfs.push(...d.profissionais);}
   if(!allProfs.length){el.innerHTML='<div class="no-data">Nenhum dado no período.</div>';return;}
 
-  // Agrupa por profissional (acumulado)
+  // Agrupa por profissional
   const aggMap={};
   allProfs.forEach(p=>{
     if(!aggMap[p.n])aggMap[p.n]={n:p.n,rb:0,rl:0,rep:0,at:0,servicos:{}};
     aggMap[p.n].rb+=p.rb;aggMap[p.n].rl+=p.rl;aggMap[p.n].rep+=p.rep;aggMap[p.n].at+=p.at;
-    const sk=p.d;
-    if(!aggMap[p.n].servicos[sk])aggMap[p.n].servicos[sk]={d:sk,rb:0,rl:0,rep:0,at:0};
-    aggMap[p.n].servicos[sk].rb+=p.rb;aggMap[p.n].servicos[sk].rl+=p.rl;
-    aggMap[p.n].servicos[sk].rep+=p.rep;aggMap[p.n].servicos[sk].at+=p.at;
+    if(!aggMap[p.n].servicos[p.d])aggMap[p.n].servicos[p.d]={d:p.d,rb:0,rl:0,rep:0,at:0};
+    aggMap[p.n].servicos[p.d].rb+=p.rb;aggMap[p.n].servicos[p.d].rl+=p.rl;
+    aggMap[p.n].servicos[p.d].rep+=p.rep;aggMap[p.n].servicos[p.d].at+=p.at;
   });
 
-  const calc=o=>{
-    const mc=o.rl-o.rep,i=calcImpostos(o.rl),ll=mc-i.total;
-    return{...o,mc,imp:i.total,ll,mcP:o.rl>0?mc/o.rl:0,repP:o.rl>0?o.rep/o.rl:0,llP:o.rl>0?ll/o.rl:0,tAt:o.at>0?o.rl/o.at:0};
-  };
+  const calc=o=>{const mc=o.rl-o.rep,i=calcImpostos(o.rl),ll=mc-i.total;
+    return{...o,mc,imp:i.total,ll,mcP:o.rl>0?mc/o.rl:0,repP:o.rl>0?o.rep/o.rl:0,llP:o.rl>0?ll/o.rl:0,tAt:o.at>0?o.rl/o.at:0};};
 
   const profs=Object.values(aggMap).map(p=>calc({...p})).sort((a,b)=>b.rl-a.rl);
 
-  const cols=["Profissional","Rec.Bruta","Rec.Líq.","C.Direto","%","Mg.Contrib.","%MC","Prov.IR","Luc.Líq.","%LL","Ticket","Atend."];
-  const row=(o,isProf)=>{
-    const prefix=isProf?`<td class="b" style="cursor:pointer;font-size:${isProf?11:10}px" onclick="toggleProfDrill('${o.n.replace(/'/g,"\\'")}')">▶ ${o.n}</td>`:`<td style="font-size:10px;color:var(--muted);padding-left:24px">↳ ${o.d}</td>`;
-    return`<tr id="${isProf?"prof-row-"+o.n.replace(/\s/g,"_"):""}" style="background:${o.ll<0&&isProf?"#fef2f2":""}">
-      ${prefix}
-      <td class="r mn">${fR(o.rb)}</td><td class="r mn">${fR(o.rl)}</td>
-      <td class="r mn rd">${fR(o.rep)}</td><td class="r">${bdg(o.repP)}</td>
-      <td class="r mn b" style="color:${clr(o.mc)}">${fR(o.mc)}</td><td class="r">${bdg(o.mcP)}</td>
-      <td class="r mn" style="color:var(--muted)">${fR(o.imp)}</td>
-      <td class="r mn b" style="color:${clr(o.ll)}">${fR(o.ll)}</td><td class="r">${bdg(o.llP)}</td>
-      <td class="r mn">${fR(o.tAt)}</td><td class="r mn">${o.at}</td>
+  // Gera linhas: prof principal + sub-linhas (tr com classe)
+  const bodyRows=profs.map(p=>{
+    const pid=p.n.replace(/[^a-z0-9]/gi,"_");
+    const servs=Object.values(p.servicos).map(s=>calc({...s,n:p.n})).sort((a,b)=>b.rl-a.rl);
+    const mainRow=`<tr class="prof-main" data-pid="${pid}" data-v="${p.rl}" onclick="toggleProfDrill('${pid}')" style="cursor:pointer;background:${p.ll<0?"#fef2f2":""}">
+      <td class="b" style="font-size:11px"><span id="ico-p-${pid}" style="font-size:9px;opacity:.5;margin-right:4px">▶</span>${p.n}</td>
+      <td class="r mn" data-v="${p.rb}">${fR(p.rb)}</td>
+      <td class="r mn" data-v="${p.rl}">${fR(p.rl)}</td>
+      <td class="r mn rd" data-v="${p.rep}">${fR(p.rep)}</td>
+      <td class="r" data-v="${p.repP}">${bdg(p.repP)}</td>
+      <td class="r mn b" style="color:${clr(p.mc)}" data-v="${p.mc}">${fR(p.mc)}</td>
+      <td class="r" data-v="${p.mcP}">${bdg(p.mcP)}</td>
+      <td class="r mn" style="color:var(--muted)" data-v="${p.imp}">${fR(p.imp)}</td>
+      <td class="r mn b" style="color:${clr(p.ll)}" data-v="${p.ll}">${fR(p.ll)}</td>
+      <td class="r" data-v="${p.llP}">${bdg(p.llP)}</td>
+      <td class="r mn" data-v="${p.tAt}">${fR(p.tAt)}</td>
+      <td class="r mn" data-v="${p.at}">${p.at}</td>
     </tr>`;
-  };
-
-  const rows=profs.map(p=>{
-    const servRows=Object.values(p.servicos).map(s=>calc({...s,n:p.n})).sort((a,b)=>b.rl-a.rl);
-    const subHtml=servRows.map(s=>row(s,false)).join("");
-    return row(p,true)+`<tbody id="prof-sub-${p.n.replace(/\s/g,"_")}" style="display:none">${subHtml}</tbody>`;
+    const subRows=servs.map(s=>`<tr class="prof-sub prof-sub-${pid}" style="display:none;background:var(--hover)">
+      <td style="font-size:10px;color:var(--muted);padding-left:28px">↳ ${s.d}</td>
+      <td class="r mn" style="font-size:10px">${fR(s.rb)}</td>
+      <td class="r mn" style="font-size:10px">${fR(s.rl)}</td>
+      <td class="r mn rd" style="font-size:10px">${fR(s.rep)}</td>
+      <td class="r" style="font-size:9px">${bdg(s.repP)}</td>
+      <td class="r mn" style="font-size:10px;color:${clr(s.mc)}">${fR(s.mc)}</td>
+      <td class="r" style="font-size:9px">${bdg(s.mcP)}</td>
+      <td class="r mn" style="font-size:10px;color:var(--muted)">${fR(s.imp)}</td>
+      <td class="r mn" style="font-size:10px;color:${clr(s.ll)}">${fR(s.ll)}</td>
+      <td class="r" style="font-size:9px">${bdg(s.llP)}</td>
+      <td class="r mn" style="font-size:10px">${fR(s.tAt)}</td>
+      <td class="r mn" style="font-size:10px">${s.at}</td>
+    </tr>`).join("");
+    return mainRow+subRows;
   }).join("");
 
   el.innerHTML=`
-  <div class="src-info">📊 Fonte: Excel · Clique no profissional para ver por serviço</div>
+  <div class="src-info">📊 Fonte: Excel · Clique no nome para ver por serviço</div>
   <div class="panel"><div class="pt">Resultado por Profissional <span class="pt-badge">${profs.length} prof.</span></div>
   <div class="tw"><table id="tbl-prof" style="width:100%"><thead><tr>
     ${thSort("tbl-prof",0,"Profissional","")}${thSort("tbl-prof",1,"Rec.Bruta","r")}${thSort("tbl-prof",2,"Rec.Líq.","r")}${thSort("tbl-prof",3,"C.Direto","r")}${thSort("tbl-prof",4,"%","r")}${thSort("tbl-prof",5,"Mg.Contrib.","r")}${thSort("tbl-prof",6,"%MC","r")}${thSort("tbl-prof",7,"Prov.IR","r")}${thSort("tbl-prof",8,"Luc.Líq.","r")}${thSort("tbl-prof",9,"%LL","r")}${thSort("tbl-prof",10,"Ticket","r")}${thSort("tbl-prof",11,"Atend.","r")}
-  </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  </tr></thead><tbody>${bodyRows}</tbody></table></div></div>`;
 }
 
 
