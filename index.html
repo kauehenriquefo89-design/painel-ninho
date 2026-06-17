@@ -158,6 +158,20 @@ td.rd{color:var(--red)}td.gn{color:var(--green)}
 <script>
 
 const API    = "/api/api";
+// Cores fixas por procedimento (determinísticas — mesma cor independente do mês)
+const PROC_COLORS=[
+  "#C4622D","#3b82f6","#10b981","#f59e0b","#8b5cf6","#ef4444",
+  "#06b6d4","#84cc16","#ec4899","#f97316","#14b8a6","#6366f1",
+  "#a16207","#0ea5e9","#d946ef","#22c55e","#e11d48","#7c3aed"
+];
+const _procColorMap={};
+function getProcColor(name){
+  if(!_procColorMap[name]){
+    const keys=Object.keys(_procColorMap);
+    _procColorMap[name]=PROC_COLORS[keys.length%PROC_COLORS.length];
+  }
+  return _procColorMap[name];
+}
 const STORE  = "/api/store";
 const PLUGGY = "/api/pluggy";
 const POLL_MS = 300000;
@@ -1549,6 +1563,15 @@ window.exportDRE=function(){
   const periodo=meses.length>1?meses[0]+"_a_"+meses[meses.length-1]:(meses[0]||"total");
   window.XLSX.writeFile(wb,"DRE_Espaco_Ninho_"+periodo+".xlsx");
 };
+window.toggleProfDrill=function(name){
+  const id=name.replace(/\s/g,"_");
+  const sub=document.getElementById("prof-sub-"+id);
+  const row=document.getElementById("prof-row-"+id);
+  if(!sub)return;
+  const open=sub.style.display==="none";
+  sub.style.display=open?"table-row-group":"none";
+  if(row){const td=row.querySelector("td");if(td)td.innerHTML=(open?"▼ ":"▶ ")+name;}
+};
 window.setDreMode=function(mode){DRE_MODE=mode;renderDRE()};
 window.dreToggleMes=function(m){
   const i=MESES_SEL.indexOf(m);
@@ -1588,27 +1611,73 @@ function renderTicket(){
   ${hasXL&&d.familias&&d.familias.length?`<div class="section-title">🏠 Por Família</div><div class="panel"><div class="pt">Ticket por Família</div><div class="tw"><table id="tbl-ticket"><thead><tr id="tbl-ticket-hdr">
     ${thSort("tbl-ticket",0,"Família","")}${thSort("tbl-ticket",1,"Rec.Líq.","r")}${thSort("tbl-ticket",2,"Atend.","r")}${thSort("tbl-ticket",3,"Pac.","r")}${thSort("tbl-ticket",4,"Ticket/Atend","r")}${thSort("tbl-ticket",5,"Ticket/Pac","r")}
   </tr></thead><tbody>${d.familias.map(f=>`<tr><td class="b">${f.n}</td><td class="r mn">${fR(f.rl)}</td><td class="r mn">${f.at}</td><td class="r mn">${f.pac}</td><td class="r mn b">${fR(f.tAt)}</td><td class="r mn b" style="color:var(--brand)">${fR(f.tPac)}</td></tr>`).join("")}</tbody></table></div></div>`:""}
-  ${hasXL&&d.disciplinas&&d.disciplinas.length?`<div class="section-title">🏥 Por Disciplina/Procedimento</div><div class="prow"><div class="panel"><div class="pt">Ranking Ticket/Atend.</div><div class="cwrap">${barH([...d.disciplinas].sort((a,b)=>b.tAt-a.tAt).slice(0,12).map((x,i)=>({l:x.n,v:x.tAt,c:COLS[i%16]})),440)}</div></div><div class="panel"><div class="pt">Detalhes</div><div class="tw"><table><thead><tr><th>Procedimento</th><th class="r">Ticket/Atend</th><th class="r">Ticket/Pac</th><th class="r">Atend.</th><th class="r">Rec. (Valor–Desc.)</th></tr></thead><tbody>${d.disciplinas.map(x=>`<tr><td class="b">${x.n}</td><td class="r mn">${fR(x.tAt)}</td><td class="r mn">${fR(x.tPac||0)}</td><td class="r mn">${x.at}</td><td class="r mn b">${fR(x.rl)}</td></tr>`).join("")}</tbody></table></div></div></div>`:""}`;
+  ${hasXL&&d.disciplinas&&d.disciplinas.length?`<div class="section-title">🏥 Por Disciplina/Procedimento</div><div class="prow"><div class="panel"><div class="pt">Ranking Ticket/Atend.</div><div class="cwrap">${barH([...d.disciplinas].sort((a,b)=>b.tAt-a.tAt).slice(0,12).map((x,i)=>({l:x.n,v:x.tAt,c:COLS[i%16]})),440)}</div></div><div class="panel"><div class="pt">Detalhes</div><div class="tw"><table><thead><tr><th>Procedimento</th><th class="r">Ticket/Atend</th><th class="r">Ticket/Pac</th><th class="r">Atend.</th><th class="r">Rec. (Valor–Desc.)</th></tr></thead><tbody>${d.disciplinas.map(x=>`<tr><td class="b" style="border-left:3px solid ${getProcColor(x.n)};padding-left:8px">${x.n}</td><td class="r mn">${fR(x.tAt)}</td><td class="r mn">${fR(x.tPac||0)}</td><td class="r mn">${x.at}</td><td class="r mn b">${fR(x.rl)}</td></tr>`).join("")}</tbody></table></div></div></div>`:""}`;
 }
 
 function renderProf(){
-  const el=document.getElementById("sec-prof");if(!APP){el.innerHTML=splashHTML();return;}
-  if(!XL_DATA){el.innerHTML=`<div class="excel-needed">📊 <b>Conecte o Excel</b> para atualizar · <button onclick="connectExcel()" style="border:none;background:var(--brand);color:#fff;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit">Selecionar arquivo</button></div>`;return;}
-  const d=getActiveData();if(!d.profissionais||!d.profissionais.length){el.innerHTML='<div class="no-data">Nenhum dado no período.</div>';return;}
-  const alrts=d.profissionais.filter(p=>p.ll<0);
-  const discs=["Todas",...new Set(d.profissionais.map(p=>p.d))].sort();
-  const filtrado=PROF_DISC==="Todas"?d.profissionais:d.profissionais.filter(p=>p.d===PROF_DISC);
+  const el=document.getElementById("sec-prof");
+  if(!APP){el.innerHTML=splashHTML();return;}
+  if(!XL_DATA){el.innerHTML=`<div class="excel-needed">📊 <b>Conecte o Excel</b> para atualizar</div>`;return;}
+
+  // Obtém dados do período ativo
+  const meses=MESES_SEL.length>0?MESES_SEL:(CUR_MES!=="TOTAL"?[CUR_MES]:MESES);
+  const allProfs=[];
+  meses.forEach(m=>{
+    const d=APP.byMes[m];
+    if(d?.profissionais)allProfs.push(...d.profissionais);
+  });
+  if(!allProfs.length){const d=getActiveData();if(d?.profissionais)allProfs.push(...d.profissionais);}
+  if(!allProfs.length){el.innerHTML='<div class="no-data">Nenhum dado no período.</div>';return;}
+
+  // Agrupa por profissional (acumulado)
+  const aggMap={};
+  allProfs.forEach(p=>{
+    if(!aggMap[p.n])aggMap[p.n]={n:p.n,rb:0,rl:0,rep:0,at:0,servicos:{}};
+    aggMap[p.n].rb+=p.rb;aggMap[p.n].rl+=p.rl;aggMap[p.n].rep+=p.rep;aggMap[p.n].at+=p.at;
+    const sk=p.d;
+    if(!aggMap[p.n].servicos[sk])aggMap[p.n].servicos[sk]={d:sk,rb:0,rl:0,rep:0,at:0};
+    aggMap[p.n].servicos[sk].rb+=p.rb;aggMap[p.n].servicos[sk].rl+=p.rl;
+    aggMap[p.n].servicos[sk].rep+=p.rep;aggMap[p.n].servicos[sk].at+=p.at;
+  });
+
+  const calc=o=>{
+    const mc=o.rl-o.rep,i=calcImpostos(o.rl),ll=mc-i.total;
+    return{...o,mc,imp:i.total,ll,mcP:o.rl>0?mc/o.rl:0,repP:o.rl>0?o.rep/o.rl:0,llP:o.rl>0?ll/o.rl:0,tAt:o.at>0?o.rl/o.at:0};
+  };
+
+  const profs=Object.values(aggMap).map(p=>calc({...p})).sort((a,b)=>b.rl-a.rl);
+
+  const cols=["Profissional","Rec.Bruta","Rec.Líq.","C.Direto","%","Mg.Contrib.","%MC","Prov.IR","Luc.Líq.","%LL","Ticket","Atend."];
+  const row=(o,isProf)=>{
+    const prefix=isProf?`<td class="b" style="cursor:pointer;font-size:${isProf?11:10}px" onclick="toggleProfDrill('${o.n.replace(/'/g,"\\'")}')">▶ ${o.n}</td>`:`<td style="font-size:10px;color:var(--muted);padding-left:24px">↳ ${o.d}</td>`;
+    return`<tr id="${isProf?"prof-row-"+o.n.replace(/\s/g,"_"):""}" style="background:${o.ll<0&&isProf?"#fef2f2":""}">
+      ${prefix}
+      <td class="r mn">${fR(o.rb)}</td><td class="r mn">${fR(o.rl)}</td>
+      <td class="r mn rd">${fR(o.rep)}</td><td class="r">${bdg(o.repP)}</td>
+      <td class="r mn b" style="color:${clr(o.mc)}">${fR(o.mc)}</td><td class="r">${bdg(o.mcP)}</td>
+      <td class="r mn" style="color:var(--muted)">${fR(o.imp)}</td>
+      <td class="r mn b" style="color:${clr(o.ll)}">${fR(o.ll)}</td><td class="r">${bdg(o.llP)}</td>
+      <td class="r mn">${fR(o.tAt)}</td><td class="r mn">${o.at}</td>
+    </tr>`;
+  };
+
+  const rows=profs.map(p=>{
+    const servRows=Object.values(p.servicos).map(s=>calc({...s,n:p.n})).sort((a,b)=>b.rl-a.rl);
+    const subHtml=servRows.map(s=>row(s,false)).join("");
+    return row(p,true)+`<tbody id="prof-sub-${p.n.replace(/\s/g,"_")}" style="display:none">${subHtml}</tbody>`;
+  }).join("");
+
   el.innerHTML=`
-  ${alrts.length?`<div class="alrt">⚠ <div><b>LL negativo:</b> ${alrts.map(p=>`${p.n} (${p.d}) → ${fR(p.ll)}`).join(" · ")}</div></div>`:""}
-  <div class="fltrs">${discs.map(d2=>`<button class="fb${d2===PROF_DISC?" a":""}" onclick="setProfDisc('${d2.replace(/'/g,"\\'")}',this)">${d2}</button>`).join("")}</div>
-  <div class="src-info">📊 Fonte: Excel (Relação geral) · Receita = Valor a Receber (Valor – Desconto) · Custo Direto = Valor Profissional</div>
-  <div class="panel"><div class="pt">Resultado por Profissional <span class="pt-badge">${filtrado.length} prof.</span></div>
-  <div class="tw"><table id="tbl-prof"><thead><tr>
-    ${thSort("tbl-prof",0,"Profissional","")}${thSort("tbl-prof",1,"Procedimento","")}${thSort("tbl-prof",2,"Rec.Bruta","r")}${thSort("tbl-prof",3,"Rec.Líq.","r")}${thSort("tbl-prof",4,"C.Direto","r")}${thSort("tbl-prof",5,"%","r")}${thSort("tbl-prof",6,"Mg.Contrib.","r")}${thSort("tbl-prof",7,"%MC","r")}${thSort("tbl-prof",8,"Prov.IR","r")}${thSort("tbl-prof",9,"Luc.Líq.","r")}${thSort("tbl-prof",10,"%LL","r")}${thSort("tbl-prof",11,"Ticket","r")}${thSort("tbl-prof",12,"Atend.","r")}
-  </tr></thead><tbody>
-  ${filtrado.map(p=>`<tr style="background:${p.ll<0?"#fef2f2":""}"><td style="font-size:10px;font-weight:600">${p.n}${p.ll<0?" ⚠":""}</td><td style="font-size:10px;color:var(--muted)">${p.d}</td><td class="r mn">${fR(p.rb)}</td><td class="r mn">${fR(p.rl)}</td><td class="r mn rd">${fR(p.rep)}</td><td class="r">${bdg(p.repP)}</td><td class="r mn b" style="color:${clr(p.mc)}">${fR(p.mc)}</td><td class="r">${bdg(p.mcP)}</td><td class="r mn" style="color:var(--muted)">${fR(p.imp)}</td><td class="r mn b" style="color:${clr(p.ll)}">${fR(p.ll)}</td><td class="r">${bdg(p.llP)}</td><td class="r mn">${fR(p.tAt)}</td><td class="r mn">${p.at}</td></tr>`).join("")}
-  </tbody></table></div></div>`;
+  <div class="src-info">📊 Fonte: Excel · Clique no profissional para ver por serviço</div>
+  <div class="panel"><div class="pt">Resultado por Profissional <span class="pt-badge">${profs.length} prof.</span></div>
+  <div class="tw"><table id="tbl-prof" style="width:100%"><thead><tr>
+    <th>Profissional</th><th class="r">Rec.Bruta</th><th class="r">Rec.Líq.</th>
+    <th class="r">C.Direto</th><th class="r">%</th><th class="r">Mg.Contrib.</th>
+    <th class="r">%MC</th><th class="r">Prov.IR</th><th class="r">Luc.Líq.</th>
+    <th class="r">%LL</th><th class="r">Ticket</th><th class="r">Atend.</th>
+  </tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
+
 
 function renderDisc(){
   const el=document.getElementById("sec-disc");if(!APP){el.innerHTML=splashHTML();return;}
@@ -1617,12 +1686,15 @@ function renderDisc(){
   el.innerHTML=`
   <div class="src-info">📊 Fonte: Excel (Relação geral) · Receita = Valor a Receber · Custo Direto = Valor Profissional · Pacientes únicos por procedimento</div>
   <div class="panel"><div class="pt">Receita vs Margem por Procedimento</div>
-  <div class="cwrap">${barG(d.disciplinas.slice(0,12).map(x=>x.n.length>9?x.n.slice(0,9)+"…":x.n),[{nm:"Rec.Líq.",v:d.disciplinas.slice(0,12).map(x=>x.rl),c:"var(--blue)"},{nm:"Mg.Contrib.",v:d.disciplinas.slice(0,12).map(x=>x.mc),c:"var(--brand)"},{nm:"Luc.Líq.",v:d.disciplinas.slice(0,12).map(x=>x.ll),c:"var(--green)"}],760)}</div></div>
+  <div class="cwrap">${barG(d.disciplinas.slice(0,12).map(x=>x.n.length>9?x.n.slice(0,9)+"…":x.n),[{nm:"Rec.Líq.",v:d.disciplinas.slice(0,12).map(x=>x.rl),c:"var(--blue)"},{nm:"Mg.Contrib.",v:d.disciplinas.slice(0,12).map(x=>x.mc),c:"var(--brand)"},{nm:"Luc.Líq.",v:d.disciplinas.slice(0,12).map(x=>x.ll),c:"var(--green)"}],760)}
+<div style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 0;font-size:10px">
+${d.disciplinas.slice(0,12).map(x=>`<span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:${getProcColor(x.n)};display:inline-block"></span>${x.n}</span>`).join("")}
+</div></div></div>
   <div class="panel"><div class="pt">Resultado por Procedimento</div>
   <div class="tw"><table id="tbl-disc"><thead><tr>
     ${thSort("tbl-disc",0,"Procedimento","")}${thSort("tbl-disc",1,"Rec.Líq.","r")}${thSort("tbl-disc",2,"C.Direto","r")}${thSort("tbl-disc",3,"%","r")}${thSort("tbl-disc",4,"Mg.Contrib.","r")}${thSort("tbl-disc",5,"%MC","r")}${thSort("tbl-disc",6,"Prov.IR","r")}${thSort("tbl-disc",7,"Luc.Líq.","r")}${thSort("tbl-disc",8,"%LL","r")}${thSort("tbl-disc",9,"Ticket/At","r")}${thSort("tbl-disc",10,"Ticket/Pac","r")}${thSort("tbl-disc",11,"Atend.","r")}
   </tr></thead><tbody>
-  ${d.disciplinas.map(x=>`<tr><td class="b">${x.n}</td><td class="r mn">${fR(x.rl)}</td><td class="r mn rd">${fR(x.rep)}</td><td class="r">${bdg(x.repP)}</td><td class="r mn b" style="color:${clr(x.mc)}">${fR(x.mc)}</td><td class="r">${bdg(x.mcP)}</td><td class="r mn" style="color:var(--muted)">${fR(x.imp)}</td><td class="r mn b" style="color:${clr(x.ll)}">${fR(x.ll)}</td><td class="r">${bdg(x.llP)}</td><td class="r mn">${fR(x.tAt)}</td><td class="r mn">${fR(x.tPac||0)}</td><td class="r mn">${x.at}</td></tr>`).join("")}
+  ${d.disciplinas.map(x=>`<tr><td class="b" style="border-left:3px solid ${getProcColor(x.n)};padding-left:8px">${x.n}</td><td class="r mn">${fR(x.rl)}</td><td class="r mn rd">${fR(x.rep)}</td><td class="r">${bdg(x.repP)}</td><td class="r mn b" style="color:${clr(x.mc)}">${fR(x.mc)}</td><td class="r">${bdg(x.mcP)}</td><td class="r mn" style="color:var(--muted)">${fR(x.imp)}</td><td class="r mn b" style="color:${clr(x.ll)}">${fR(x.ll)}</td><td class="r">${bdg(x.llP)}</td><td class="r mn">${fR(x.tAt)}</td><td class="r mn">${fR(x.tPac||0)}</td><td class="r mn">${x.at}</td></tr>`).join("")}
   </tbody></table></div></div>`;
 }
 
