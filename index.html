@@ -1671,10 +1671,7 @@ function renderProf(){
   <div class="src-info">📊 Fonte: Excel · Clique no profissional para ver por serviço</div>
   <div class="panel"><div class="pt">Resultado por Profissional <span class="pt-badge">${profs.length} prof.</span></div>
   <div class="tw"><table id="tbl-prof" style="width:100%"><thead><tr>
-    <th>Profissional</th><th class="r">Rec.Bruta</th><th class="r">Rec.Líq.</th>
-    <th class="r">C.Direto</th><th class="r">%</th><th class="r">Mg.Contrib.</th>
-    <th class="r">%MC</th><th class="r">Prov.IR</th><th class="r">Luc.Líq.</th>
-    <th class="r">%LL</th><th class="r">Ticket</th><th class="r">Atend.</th>
+    ${thSort("tbl-prof",0,"Profissional","")}${thSort("tbl-prof",1,"Rec.Bruta","r")}${thSort("tbl-prof",2,"Rec.Líq.","r")}${thSort("tbl-prof",3,"C.Direto","r")}${thSort("tbl-prof",4,"%","r")}${thSort("tbl-prof",5,"Mg.Contrib.","r")}${thSort("tbl-prof",6,"%MC","r")}${thSort("tbl-prof",7,"Prov.IR","r")}${thSort("tbl-prof",8,"Luc.Líq.","r")}${thSort("tbl-prof",9,"%LL","r")}${thSort("tbl-prof",10,"Ticket","r")}${thSort("tbl-prof",11,"Atend.","r")}
   </tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
