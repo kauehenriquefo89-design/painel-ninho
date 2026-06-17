@@ -1591,6 +1591,45 @@ window.toggleProfDrill=function(pid){
   subs.forEach(r=>r.style.display=open?"table-row":"none");
   if(ico)ico.textContent=open?"▼":"▶";
 };
+// Agrega dados de múltiplos meses para abas de análise
+function getAggData(){
+  if(!APP)return null;
+  const meses=MESES_SEL.length>0?MESES_SEL:(CUR_MES!=="TOTAL"?[CUR_MES]:null);
+  if(!meses)return getActiveData(); // TOTAL normal
+  if(meses.length===1)return APP.byMes[meses[0]]||getActiveData();
+  // Múltiplos meses: agrega atRows e profissionais
+  const atRows=[],profissionais=[],disciplinas=[],familias=[];
+  const catMap={};
+  meses.forEach(m=>{
+    const d=APP.byMes[m];if(!d)return;
+    if(d.atRows)atRows.push(...(d.atRows||[])); // não disponível aqui
+    if(d.profissionais)profissionais.push(...d.profissionais);
+    if(d.disciplinas)disciplinas.push(...d.disciplinas);
+    if(d.familias)familias.push(...d.familias);
+  });
+  // Para ticket: agrega familias
+  const famMap={};
+  familias.forEach(f=>{
+    if(!famMap[f.n])famMap[f.n]={n:f.n,rl:0,at:0,pac:f.pac||0};
+    famMap[f.n].rl+=f.rl;famMap[f.n].at+=f.at;famMap[f.n].pac+=f.pac||0;
+  });
+  // Para procedimentos: agrega disciplinas
+  const discMap={};
+  disciplinas.forEach(d=>{
+    if(!discMap[d.n])discMap[d.n]={...d};
+    else{discMap[d.n].rl+=d.rl;discMap[d.n].rep+=d.rep;discMap[d.n].at+=d.at;
+      discMap[d.n].mc+=d.mc;discMap[d.n].imp+=d.imp;discMap[d.n].ll+=d.ll;discMap[d.n].pac+=d.pac;}
+  });
+  const aggDisc=Object.values(discMap).map(d=>{
+    const mc=d.rl-d.rep,i=calcImpostos(d.rl),ll=mc-i.total;
+    return{...d,mc,imp:i.total,ll,mcP:d.rl>0?mc/d.rl:0,repP:d.rl>0?d.rep/d.rl:0,llP:d.rl>0?ll/d.rl:0,tAt:d.at>0?d.rl/d.at:0,tPac:d.pac>0?d.rl/d.pac:0};
+  }).sort((a,b)=>b.rl-a.rl);
+  const aggFam=Object.values(famMap).map(f=>({...f,tAt:f.at>0?f.rl/f.at:0,tPac:f.pac>0?f.rl/f.pac:0})).sort((a,b)=>b.rl-a.rl);
+  // Base da getActiveData mas com dados agregados
+  const base=getActiveData()||{};
+  return{...base,disciplinas:aggDisc,familias:aggFam,profissionais};
+}
+
 window.setDreMode=function(mode){DRE_MODE=mode;renderDRE()};
 window.dreToggleMes=function(m){
   const i=MESES_SEL.indexOf(m);
@@ -1619,7 +1658,7 @@ window.dreDrill=function(id){
 
 function renderTicket(){
   const el=document.getElementById("sec-ticket");if(!APP){el.innerHTML=splashHTML();return;}
-  const d=getActiveData(),hasXL=!!XL_DATA;
+  const d=getAggData()||getActiveData(),hasXL=!!XL_DATA;
   el.innerHTML=`
   <div class="src-info">${hasXL?"📊 Receita e Repasse: Excel (Relação geral) · Ticket por Atend.: Valor a Receber ÷ Atendimentos · Ticket por Pac.: Receita ÷ Pacientes únicos":"📊 Conecte o Excel (Base.xlsx) para dados por Família e Profissional"}</div>
   <div class="cards">
@@ -1724,8 +1763,9 @@ ${d.disciplinas.slice(0,12).map(x=>`<span style="display:flex;align-items:center
 
 function renderCat(){
   const el=document.getElementById("sec-cat");if(!APP){el.innerHTML=splashHTML();return;}
-  const d=getActiveData();if(!d.categorias||!d.categorias.length){el.innerHTML='<div class="no-data">Conecte o Conta Azul.</div>';return;}
+  const d=getAggData()||getActiveData();if(!d.categorias||!d.categorias.length){el.innerHTML='<div class="no-data">Conecte o Conta Azul.</div>';return;}
   el.innerHTML=`
+  <div class="src-info">📅 ${MESES_SEL.length>0?MESES_SEL.map(m=>monthLabel(m)).join(", "):(CUR_MES!=="TOTAL"?monthLabel(CUR_MES):"Total")} · Fonte: Conta Azul</div>
   <div class="panel"><div class="pt">Faturamento por Categoria <span class="pt-badge">Conta Azul</span></div>
   <div class="cwrap">${barH(d.categorias.slice(0,14).map((c,i)=>({l:c.n,v:c.faturado,c:COLS[i%16]})),520)}</div></div>
   <div class="panel"><div class="pt">Faturado vs Recebido vs Em Aberto</div>
@@ -1962,8 +2002,8 @@ function buildMesBar(){
   const c=document.getElementById("mes-btns");if(!c)return;
   if(!MESES.length){c.innerHTML='<button class="mfb a">—</button>';return;}
   const mesesVisiveis=MESES.filter(m=>!m.endsWith("-12"));
-  const isDRE=CUR_TAB==="dre";
-  if(isDRE){
+  const isMultiTab=["dre","ticket","prof","disc","cat"].includes(CUR_TAB);
+  if(isMultiTab){
     // Modo DRE: multi-select com hint
     let h=`<span style="font-size:10px;color:var(--muted);margin-right:6px">Selecione até 6 meses:</span>`;
     h+=`<button class="mfb${MESES_SEL.length===0?" a":""}" onclick="setMesDRE('TOTAL')">📅 Total</button>`;
