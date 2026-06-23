@@ -920,31 +920,30 @@ function processData(){
   // Se Pluggy não conectado, usa CA com data_vencimento como aproximação
   // Saldo inicial de Dezembro (anterior ao período de análise) — definido globalmente
   // Se Pluggy conectado, usa transações bancárias reais
-  // FC: prioriza OFX (extrato bancário real) > CA (data vencimento)
+  // FC: usa CA como fonte primária (data_pagamento real + categorias)
+  // OFX fica disponível como conferência mas não substitui o CA categorizadocorreto
   let fcData;
-  const txsOFX = OFX_DATA?.transactions?.length ? OFX_DATA.transactions : null;
-  if(txsOFX){
-    // OFX: usa datas reais de cada transação bancária
-    const ofxMeses=[...new Set(txsOFX.map(t=>toYYYYMM(t.date)).filter(Boolean))].sort();
-    let acum=SALDO_INICIAL_DEZ;
-    fcData=ofxMeses.map(m=>{
-      const messTxs=txsOFX.filter(t=>toYYYYMM(t.date)===m);
-      const e=messTxs.filter(t=>t.amount>0).reduce((a,t)=>a+t.amount,0);
-      const s=Math.abs(messTxs.filter(t=>t.amount<0).reduce((a,t)=>a+t.amount,0));
-      const sm=e-s; acum+=sm;
-      return{m:monthLabel(m),mes:m,e,s,sm,ac:acum,fonte:"ofx"};
-    });
-  } else {
-    // Fallback: Conta Azul com data_vencimento
+  {
+    // Conta Azul com data_pagamento real — com breakdown por grupo
     const fcMeses=[...new Set([...crFC,...cpFC].map(r=>r.mes).filter(Boolean))].sort();
     let acum=SALDO_INICIAL_DEZ;
     fcData=fcMeses.map(m=>{
-      const e=crFC.filter(r=>r.mes===m).reduce((a,r)=>a+r.recebido,0);
-      const s=cpFC.filter(r=>r.mes===m).reduce((a,r)=>a+r.pago,0);
-      const sm=e-s;acum+=sm;
-      return{m:monthLabel(m),mes:m,e,s,sm,ac:acum,fonte:"ca"};
+      const crM=crFC.filter(r=>r.mes===m);
+      const cpM=cpFC.filter(r=>r.mes===m);
+      const e=crM.reduce((a,r)=>a+r.recebido,0);
+      // Saídas por grupo
+      const rep=cpM.filter(r=>r.grupo==="repasse").reduce((a,r)=>a+r.pago,0);
+      const com=cpM.filter(r=>r.grupo==="comercial").reduce((a,r)=>a+r.pago,0);
+      const adm=cpM.filter(r=>r.grupo==="administrativo").reduce((a,r)=>a+r.pago,0);
+      const fin=cpM.filter(r=>r.grupo==="financeiro").reduce((a,r)=>a+r.pago,0);
+      const rend=cpM.filter(r=>r.grupo==="rendimento").reduce((a,r)=>a+r.pago,0);
+      const emp=cpM.filter(r=>r.grupo==="emprestimo").reduce((a,r)=>a+r.pago,0);
+      const imp=cpM.filter(r=>r.grupo==="imposto").reduce((a,r)=>a+r.pago,0);
+      const s=rep+com+adm+fin+emp+imp;
+      const sm=e-s+rend;acum+=sm;
+      return{m:monthLabel(m),mes:m,e,s,sm,ac:acum,fonte:"ca",rep,com,adm,fin,rend,emp,imp};
     });
-  }
+  }  // end FC build
   // Projeção: CA real (vencimentos futuros) ou média móvel se não houver
   if(fcData.length){
     const reais=fcData.filter(r=>!r.projecao&&r.e>0);
@@ -1346,7 +1345,67 @@ function renderDREMulti(meses, hasExcel){
   ${row("(–) CSLL/IRPJ (provisão)",c=>-c.csll_irpj,"var(--muted)",false)}
   ${sep()}
   ${row("= LUCRO LÍQUIDO",c=>c.ll,null,true)}
-  </tbody></table></div></div>`;
+  </tbody></table></div></div>
+
+  ${(()=>{
+    // ── CONCILIAÇÃO BANCÁRIA (OFX vs CA) ──────────────────────────────────
+    const txsOFX=OFX_DATA?.transactions?.length?OFX_DATA.transactions:null;
+    if(!txsOFX)return`<div class="panel" style="opacity:.6"><div class="pt">🏦 Conciliação Bancária</div>
+      <div style="padding:16px;color:var(--muted);font-size:13px;text-align:center">
+        Carregue o extrato OFX (botão 🏦 Extrato OFX) para comparar saldo do banco com o sistema CA.
+      </div></div>`;
+
+    // Agrupa OFX por mês
+    const ofxMeses={};
+    txsOFX.forEach(t=>{
+      const m=toYYYYMM(t.date);if(!m)return;
+      if(!ofxMeses[m])ofxMeses[m]={e:0,s:0};
+      if(t.amount>0)ofxMeses[m].e+=t.amount;
+      else ofxMeses[m].s+=Math.abs(t.amount);
+    });
+
+    // Calcula saldo acumulado OFX a partir de Dez/25
+    let acOFX=SALDO_INICIAL_DEZ;
+    const ofxRows=Object.keys(ofxMeses).sort().map(m=>{
+      const sm=ofxMeses[m].e-ofxMeses[m].s;
+      acOFX+=sm;
+      return{m,e:ofxMeses[m].e,s:ofxMeses[m].s,sm,ac:acOFX};
+    });
+
+    // Compara com CA: pega saldo acumulado de cada mês no fcData
+    const mesesConc=[...new Set([...ofxRows.map(r=>r.m),...reais.map(r=>r.mes)])].sort();
+
+    const rows=mesesConc.map(m=>{
+      const ofx=ofxRows.find(r=>r.m===m);
+      const ca=reais.find(r=>r.mes===m);
+      const acOFX_m=ofx?.ac??null;
+      const acCA_m=ca?.ac??null;
+      const diff=acOFX_m!==null&&acCA_m!==null?acOFX_m-acCA_m:null;
+      const ok=diff!==null&&Math.abs(diff)<1;
+      return`<tr>
+        <td class="b">${monthLabel(m)}</td>
+        <td class="r mn" style="color:var(--green)">${ofx?fR(ofx.e):"—"}</td>
+        <td class="r mn" style="color:var(--red)">${ofx?fR(ofx.s):"—"}</td>
+        <td class="r mn b" style="color:${acOFX_m!==null?(acOFX_m>=0?"var(--green)":"var(--red)"):"var(--muted)"}">${acOFX_m!==null?fR(acOFX_m):"—"}</td>
+        <td class="r mn b" style="color:${acCA_m!==null?(acCA_m>=0?"var(--green)":"var(--red)"):"var(--muted)"}">${acCA_m!==null?fR(acCA_m):"—"}</td>
+        <td class="r mn b" style="color:${diff===null?"var(--muted)":ok?"var(--green)":"var(--red)"}">${diff!==null?fR(diff):"—"}</td>
+        <td class="r"><span class="bdg ${diff===null?"":"ok"===(ok?"ok":"")?(ok?"bg":"br"):"br"}">${diff===null?"—":ok?"✅ OK":"⚠ Diferença"}</span></td>
+      </tr>`;
+    }).join("");
+
+    return`<div class="panel"><div class="pt">🏦 Conciliação Bancária <span class="pt-badge">${ofxRows.length} meses OFX</span></div>
+    <div class="src-info">Compara saldo acumulado do extrato bancário (OFX) com o sistema Conta Azul · Diferença ideal = R$ 0</div>
+    <div class="tw"><table style="width:100%"><thead><tr>
+      <th>Mês</th>
+      <th class="r" style="color:var(--green)">↑ OFX Entrada</th>
+      <th class="r" style="color:var(--red)">↓ OFX Saída</th>
+      <th class="r">Saldo OFX</th>
+      <th class="r">Saldo CA</th>
+      <th class="r">Diferença</th>
+      <th class="r">Status</th>
+    </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  })()}
+  `;
 }
 
 
@@ -1510,7 +1569,67 @@ function renderDREbyCostCenter(d){
   </tr></thead><tbody>
   ${sorted.map(c=>fRow(c,false)).join("")}
   ${fRow(tot,true)}
-  </tbody></table></div></div>`;
+  </tbody></table></div></div>
+
+  ${(()=>{
+    // ── CONCILIAÇÃO BANCÁRIA (OFX vs CA) ──────────────────────────────────
+    const txsOFX=OFX_DATA?.transactions?.length?OFX_DATA.transactions:null;
+    if(!txsOFX)return`<div class="panel" style="opacity:.6"><div class="pt">🏦 Conciliação Bancária</div>
+      <div style="padding:16px;color:var(--muted);font-size:13px;text-align:center">
+        Carregue o extrato OFX (botão 🏦 Extrato OFX) para comparar saldo do banco com o sistema CA.
+      </div></div>`;
+
+    // Agrupa OFX por mês
+    const ofxMeses={};
+    txsOFX.forEach(t=>{
+      const m=toYYYYMM(t.date);if(!m)return;
+      if(!ofxMeses[m])ofxMeses[m]={e:0,s:0};
+      if(t.amount>0)ofxMeses[m].e+=t.amount;
+      else ofxMeses[m].s+=Math.abs(t.amount);
+    });
+
+    // Calcula saldo acumulado OFX a partir de Dez/25
+    let acOFX=SALDO_INICIAL_DEZ;
+    const ofxRows=Object.keys(ofxMeses).sort().map(m=>{
+      const sm=ofxMeses[m].e-ofxMeses[m].s;
+      acOFX+=sm;
+      return{m,e:ofxMeses[m].e,s:ofxMeses[m].s,sm,ac:acOFX};
+    });
+
+    // Compara com CA: pega saldo acumulado de cada mês no fcData
+    const mesesConc=[...new Set([...ofxRows.map(r=>r.m),...reais.map(r=>r.mes)])].sort();
+
+    const rows=mesesConc.map(m=>{
+      const ofx=ofxRows.find(r=>r.m===m);
+      const ca=reais.find(r=>r.mes===m);
+      const acOFX_m=ofx?.ac??null;
+      const acCA_m=ca?.ac??null;
+      const diff=acOFX_m!==null&&acCA_m!==null?acOFX_m-acCA_m:null;
+      const ok=diff!==null&&Math.abs(diff)<1;
+      return`<tr>
+        <td class="b">${monthLabel(m)}</td>
+        <td class="r mn" style="color:var(--green)">${ofx?fR(ofx.e):"—"}</td>
+        <td class="r mn" style="color:var(--red)">${ofx?fR(ofx.s):"—"}</td>
+        <td class="r mn b" style="color:${acOFX_m!==null?(acOFX_m>=0?"var(--green)":"var(--red)"):"var(--muted)"}">${acOFX_m!==null?fR(acOFX_m):"—"}</td>
+        <td class="r mn b" style="color:${acCA_m!==null?(acCA_m>=0?"var(--green)":"var(--red)"):"var(--muted)"}">${acCA_m!==null?fR(acCA_m):"—"}</td>
+        <td class="r mn b" style="color:${diff===null?"var(--muted)":ok?"var(--green)":"var(--red)"}">${diff!==null?fR(diff):"—"}</td>
+        <td class="r"><span class="bdg ${diff===null?"":"ok"===(ok?"ok":"")?(ok?"bg":"br"):"br"}">${diff===null?"—":ok?"✅ OK":"⚠ Diferença"}</span></td>
+      </tr>`;
+    }).join("");
+
+    return`<div class="panel"><div class="pt">🏦 Conciliação Bancária <span class="pt-badge">${ofxRows.length} meses OFX</span></div>
+    <div class="src-info">Compara saldo acumulado do extrato bancário (OFX) com o sistema Conta Azul · Diferença ideal = R$ 0</div>
+    <div class="tw"><table style="width:100%"><thead><tr>
+      <th>Mês</th>
+      <th class="r" style="color:var(--green)">↑ OFX Entrada</th>
+      <th class="r" style="color:var(--red)">↓ OFX Saída</th>
+      <th class="r">Saldo OFX</th>
+      <th class="r">Saldo CA</th>
+      <th class="r">Diferença</th>
+      <th class="r">Status</th>
+    </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  })()}
+  `;
 }
 
 
@@ -1758,7 +1877,67 @@ ${d.disciplinas.slice(0,12).map(x=>`<span style="display:flex;align-items:center
     ${thSort("tbl-disc",0,"Procedimento","")}${thSort("tbl-disc",1,"Rec.Líq.","r")}${thSort("tbl-disc",2,"C.Direto","r")}${thSort("tbl-disc",3,"%","r")}${thSort("tbl-disc",4,"Mg.Contrib.","r")}${thSort("tbl-disc",5,"%MC","r")}${thSort("tbl-disc",6,"Prov.IR","r")}${thSort("tbl-disc",7,"Luc.Líq.","r")}${thSort("tbl-disc",8,"%LL","r")}${thSort("tbl-disc",9,"Ticket/At","r")}${thSort("tbl-disc",10,"Ticket/Pac","r")}${thSort("tbl-disc",11,"Atend.","r")}
   </tr></thead><tbody>
   ${d.disciplinas.map(x=>`<tr><td class="b" style="border-left:3px solid ${getProcColor(x.n)};padding-left:8px">${x.n}</td><td class="r mn">${fR(x.rl)}</td><td class="r mn rd">${fR(x.rep)}</td><td class="r">${bdg(x.repP)}</td><td class="r mn b" style="color:${clr(x.mc)}">${fR(x.mc)}</td><td class="r">${bdg(x.mcP)}</td><td class="r mn" style="color:var(--muted)">${fR(x.imp)}</td><td class="r mn b" style="color:${clr(x.ll)}">${fR(x.ll)}</td><td class="r">${bdg(x.llP)}</td><td class="r mn">${fR(x.tAt)}</td><td class="r mn">${fR(x.tPac||0)}</td><td class="r mn">${x.at}</td></tr>`).join("")}
-  </tbody></table></div></div>`;
+  </tbody></table></div></div>
+
+  ${(()=>{
+    // ── CONCILIAÇÃO BANCÁRIA (OFX vs CA) ──────────────────────────────────
+    const txsOFX=OFX_DATA?.transactions?.length?OFX_DATA.transactions:null;
+    if(!txsOFX)return`<div class="panel" style="opacity:.6"><div class="pt">🏦 Conciliação Bancária</div>
+      <div style="padding:16px;color:var(--muted);font-size:13px;text-align:center">
+        Carregue o extrato OFX (botão 🏦 Extrato OFX) para comparar saldo do banco com o sistema CA.
+      </div></div>`;
+
+    // Agrupa OFX por mês
+    const ofxMeses={};
+    txsOFX.forEach(t=>{
+      const m=toYYYYMM(t.date);if(!m)return;
+      if(!ofxMeses[m])ofxMeses[m]={e:0,s:0};
+      if(t.amount>0)ofxMeses[m].e+=t.amount;
+      else ofxMeses[m].s+=Math.abs(t.amount);
+    });
+
+    // Calcula saldo acumulado OFX a partir de Dez/25
+    let acOFX=SALDO_INICIAL_DEZ;
+    const ofxRows=Object.keys(ofxMeses).sort().map(m=>{
+      const sm=ofxMeses[m].e-ofxMeses[m].s;
+      acOFX+=sm;
+      return{m,e:ofxMeses[m].e,s:ofxMeses[m].s,sm,ac:acOFX};
+    });
+
+    // Compara com CA: pega saldo acumulado de cada mês no fcData
+    const mesesConc=[...new Set([...ofxRows.map(r=>r.m),...reais.map(r=>r.mes)])].sort();
+
+    const rows=mesesConc.map(m=>{
+      const ofx=ofxRows.find(r=>r.m===m);
+      const ca=reais.find(r=>r.mes===m);
+      const acOFX_m=ofx?.ac??null;
+      const acCA_m=ca?.ac??null;
+      const diff=acOFX_m!==null&&acCA_m!==null?acOFX_m-acCA_m:null;
+      const ok=diff!==null&&Math.abs(diff)<1;
+      return`<tr>
+        <td class="b">${monthLabel(m)}</td>
+        <td class="r mn" style="color:var(--green)">${ofx?fR(ofx.e):"—"}</td>
+        <td class="r mn" style="color:var(--red)">${ofx?fR(ofx.s):"—"}</td>
+        <td class="r mn b" style="color:${acOFX_m!==null?(acOFX_m>=0?"var(--green)":"var(--red)"):"var(--muted)"}">${acOFX_m!==null?fR(acOFX_m):"—"}</td>
+        <td class="r mn b" style="color:${acCA_m!==null?(acCA_m>=0?"var(--green)":"var(--red)"):"var(--muted)"}">${acCA_m!==null?fR(acCA_m):"—"}</td>
+        <td class="r mn b" style="color:${diff===null?"var(--muted)":ok?"var(--green)":"var(--red)"}">${diff!==null?fR(diff):"—"}</td>
+        <td class="r"><span class="bdg ${diff===null?"":"ok"===(ok?"ok":"")?(ok?"bg":"br"):"br"}">${diff===null?"—":ok?"✅ OK":"⚠ Diferença"}</span></td>
+      </tr>`;
+    }).join("");
+
+    return`<div class="panel"><div class="pt">🏦 Conciliação Bancária <span class="pt-badge">${ofxRows.length} meses OFX</span></div>
+    <div class="src-info">Compara saldo acumulado do extrato bancário (OFX) com o sistema Conta Azul · Diferença ideal = R$ 0</div>
+    <div class="tw"><table style="width:100%"><thead><tr>
+      <th>Mês</th>
+      <th class="r" style="color:var(--green)">↑ OFX Entrada</th>
+      <th class="r" style="color:var(--red)">↓ OFX Saída</th>
+      <th class="r">Saldo OFX</th>
+      <th class="r">Saldo CA</th>
+      <th class="r">Diferença</th>
+      <th class="r">Status</th>
+    </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  })()}
+  `;
 }
 
 function renderCat(){
@@ -1773,7 +1952,67 @@ function renderCat(){
     ${thSort("tbl-cat",0,"Categoria","")}${thSort("tbl-cat",1,"Faturado","r")}${thSort("tbl-cat",2,"Recebido","r")}${thSort("tbl-cat",3,"Em Aberto","r")}${thSort("tbl-cat",4,"% Rec.","r")}
   </tr></thead><tbody>
   ${d.categorias.map(c=>`<tr><td class="b">${c.n}</td><td class="r mn">${fR(c.faturado)}</td><td class="r mn gn">${fR(c.recebido)}</td><td class="r mn rd">${fR(c.aberto)}</td><td class="r">${bdg(c.faturado>0?c.recebido/c.faturado:0)}</td></tr>`).join("")}
-  </tbody></table></div></div>`;
+  </tbody></table></div></div>
+
+  ${(()=>{
+    // ── CONCILIAÇÃO BANCÁRIA (OFX vs CA) ──────────────────────────────────
+    const txsOFX=OFX_DATA?.transactions?.length?OFX_DATA.transactions:null;
+    if(!txsOFX)return`<div class="panel" style="opacity:.6"><div class="pt">🏦 Conciliação Bancária</div>
+      <div style="padding:16px;color:var(--muted);font-size:13px;text-align:center">
+        Carregue o extrato OFX (botão 🏦 Extrato OFX) para comparar saldo do banco com o sistema CA.
+      </div></div>`;
+
+    // Agrupa OFX por mês
+    const ofxMeses={};
+    txsOFX.forEach(t=>{
+      const m=toYYYYMM(t.date);if(!m)return;
+      if(!ofxMeses[m])ofxMeses[m]={e:0,s:0};
+      if(t.amount>0)ofxMeses[m].e+=t.amount;
+      else ofxMeses[m].s+=Math.abs(t.amount);
+    });
+
+    // Calcula saldo acumulado OFX a partir de Dez/25
+    let acOFX=SALDO_INICIAL_DEZ;
+    const ofxRows=Object.keys(ofxMeses).sort().map(m=>{
+      const sm=ofxMeses[m].e-ofxMeses[m].s;
+      acOFX+=sm;
+      return{m,e:ofxMeses[m].e,s:ofxMeses[m].s,sm,ac:acOFX};
+    });
+
+    // Compara com CA: pega saldo acumulado de cada mês no fcData
+    const mesesConc=[...new Set([...ofxRows.map(r=>r.m),...reais.map(r=>r.mes)])].sort();
+
+    const rows=mesesConc.map(m=>{
+      const ofx=ofxRows.find(r=>r.m===m);
+      const ca=reais.find(r=>r.mes===m);
+      const acOFX_m=ofx?.ac??null;
+      const acCA_m=ca?.ac??null;
+      const diff=acOFX_m!==null&&acCA_m!==null?acOFX_m-acCA_m:null;
+      const ok=diff!==null&&Math.abs(diff)<1;
+      return`<tr>
+        <td class="b">${monthLabel(m)}</td>
+        <td class="r mn" style="color:var(--green)">${ofx?fR(ofx.e):"—"}</td>
+        <td class="r mn" style="color:var(--red)">${ofx?fR(ofx.s):"—"}</td>
+        <td class="r mn b" style="color:${acOFX_m!==null?(acOFX_m>=0?"var(--green)":"var(--red)"):"var(--muted)"}">${acOFX_m!==null?fR(acOFX_m):"—"}</td>
+        <td class="r mn b" style="color:${acCA_m!==null?(acCA_m>=0?"var(--green)":"var(--red)"):"var(--muted)"}">${acCA_m!==null?fR(acCA_m):"—"}</td>
+        <td class="r mn b" style="color:${diff===null?"var(--muted)":ok?"var(--green)":"var(--red)"}">${diff!==null?fR(diff):"—"}</td>
+        <td class="r"><span class="bdg ${diff===null?"":"ok"===(ok?"ok":"")?(ok?"bg":"br"):"br"}">${diff===null?"—":ok?"✅ OK":"⚠ Diferença"}</span></td>
+      </tr>`;
+    }).join("");
+
+    return`<div class="panel"><div class="pt">🏦 Conciliação Bancária <span class="pt-badge">${ofxRows.length} meses OFX</span></div>
+    <div class="src-info">Compara saldo acumulado do extrato bancário (OFX) com o sistema Conta Azul · Diferença ideal = R$ 0</div>
+    <div class="tw"><table style="width:100%"><thead><tr>
+      <th>Mês</th>
+      <th class="r" style="color:var(--green)">↑ OFX Entrada</th>
+      <th class="r" style="color:var(--red)">↓ OFX Saída</th>
+      <th class="r">Saldo OFX</th>
+      <th class="r">Saldo CA</th>
+      <th class="r">Diferença</th>
+      <th class="r">Status</th>
+    </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  })()}
+  `;
 }
 
 function renderFluxo(){
@@ -1807,12 +2046,106 @@ function renderFluxo(){
   <div class="cwrap">${barG(fc.map(r=>r.m),[{nm:"Entradas",v:fc.map(r=>r.e),c:"var(--green)"},{nm:"Saídas",v:fc.map(r=>r.s),c:"var(--red)"}],760)}</div></div>
   <div class="panel"><div class="pt">Saldo Acumulado</div>
   <div class="cwrap">${areaC(fc.map(r=>r.m),fc.map(r=>r.ac),"var(--brand)",760,170,projIdx)}</div></div>
-  <div class="src-info">💰 ${(typeof OFX_DATA!=="undefined"&&OFX_DATA?.transactions?.length)?"🏦 Extrato OFX · datas reais de cada transação · "+OFX_DATA.total+" transações":"⚠ Conta Azul (data vencimento) · carregue o extrato OFX para datas reais"} · Saldo inicial Dez/25: R$ 40.003 · Projeção = média dos últimos 3 meses</div>
+  <div class="src-info">💰 Conta Azul · datas reais de pagamento/recebimento · categorizado por grupo · Saldo inicial Dez/25: R$ 40.003 · Projeção = CA ou média móvel</div>
   <div class="panel"><div class="pt">Detalhamento — Realizado (valores quitados/recebidos)</div>
-  <div class="tw"><table><thead><tr><th>Mês</th><th class="r">Recebido</th><th class="r">Pago</th><th class="r">Saldo Mensal</th><th class="r">Saldo Acum.</th><th class="r">Tipo</th></tr></thead><tbody>
-  <tr style="background:#f5f1ef;font-weight:700"><td class="b">Dez/25 (saldo inicial)</td><td class="r mn" colspan="3" style="color:var(--muted)">—</td><td class="r mn b" style="color:var(--brand)">${fR(SALDO_INICIAL_DEZ)}</td><td class="r"><span class="bdg bg">Inicial</span></td></tr>
-  ${fc.map(r=>`<tr style="${r.projecao?"opacity:.75":""}"><td class="b">${r.m}${r.fonte==="ofx"?' <span style="font-size:9px;color:var(--green)">🏦</span>':r.fonte==="ca_prev"?' <span style="font-size:9px;color:var(--brand)">📋 CA</span>':r.fonte==="ca"?' <span style="font-size:9px;color:var(--muted)">CA</span>':''}</td><td class="r mn gn">${fR(r.e)}</td><td class="r mn rd">${fR(r.s)}</td><td class="r mn b" style="color:${clr(r.sm)}">${fR(r.sm)}</td><td class="r mn b" style="color:${r.ac>=0?'var(--green)':'var(--red)'}">${fR(r.ac)}</td><td class="r"><span class="bdg ${r.projecao?"bo":r.sm>=0?"bg":"br"}">${r.projecao?"📊 Proj.":r.sm>=0?"✓ Ok":"⚠ Neg."}</span></td></tr>`).join("")}
-  </tbody></table></div></div>`;
+  <div class="tw"><table style="width:100%;min-width:800px"><thead><tr>
+    <th>Mês</th>
+    <th class="r" style="color:var(--green)">↑ Receitas</th>
+    <th class="r" style="color:var(--red)">↓ Repasses</th>
+    <th class="r" style="color:var(--red)">↓ Desp.Com.</th>
+    <th class="r" style="color:var(--red)">↓ Desp.Adm.</th>
+    <th class="r" style="color:var(--muted)">Res.Fin.</th>
+    <th class="r" style="color:var(--muted)">Amort.</th>
+    <th class="r" style="color:var(--muted)">Impostos</th>
+    <th class="r font-bold">Saldo Mês</th>
+    <th class="r font-bold">Saldo Acum.</th>
+    <th class="r">Status</th>
+  </tr></thead><tbody>
+  <tr style="background:#f5f1ef;font-weight:700">
+    <td class="b">Dez/25 (inicial)</td>
+    <td colspan="8" style="color:var(--muted);text-align:center">—</td>
+    <td class="r mn b" style="color:var(--green)">${fR(SALDO_INICIAL_DEZ)}</td>
+    <td class="r"><span class="bdg bg">Inicial</span></td>
+  </tr>
+  ${fc.map(r=>{
+    const isCA=r.fonte==="ca"||r.fonte==="ca_prev";
+    const rfin=isCA?(r.rend||0)-(r.fin||0):0;
+    const badge=r.fonte==="ofx"?' 🏦':r.fonte==="ca_prev"?' 📋':r.fonte==="ca"?' CA':'';
+    return`<tr style="${r.projecao?"opacity:.75;font-style:italic":""}">
+      <td class="b" style="font-size:11px">${r.m}<span style="font-size:9px;color:var(--muted)">${badge}</span></td>
+      <td class="r mn" style="color:var(--green)">${fR(r.e)}</td>
+      <td class="r mn" style="color:${r.rep>0?"var(--red)":"var(--muted)"}">${r.rep?fR(-r.rep):"—"}</td>
+      <td class="r mn" style="color:${r.com>0?"var(--red)":"var(--muted)"}">${r.com?fR(-r.com):"—"}</td>
+      <td class="r mn" style="color:${r.adm>0?"var(--red)":"var(--muted)"}">${r.adm?fR(-r.adm):"—"}</td>
+      <td class="r mn" style="color:${rfin>=0?"var(--green)":"var(--red)"}">${isCA?fR(rfin):"—"}</td>
+      <td class="r mn" style="color:${r.emp>0?"var(--red)":"var(--muted)"}">${r.emp?fR(-r.emp):"—"}</td>
+      <td class="r mn" style="color:${r.imp>0?"var(--red)":"var(--muted)"}">${r.imp?fR(-r.imp):"—"}</td>
+      <td class="r mn b" style="color:${clr(r.sm)}">${fR(r.sm)}</td>
+      <td class="r mn b" style="color:${r.ac>=0?"var(--green)":"var(--red)"}">${fR(r.ac)}</td>
+      <td class="r"><span class="bdg ${r.projecao?"bo":r.sm>=0?"bg":"br"}">${r.projecao?"📊 Proj.":r.sm>=0?"✓ Ok":"⚠ Neg."}</span></td>
+    </tr>`;
+  }).join("")}
+  </tbody></table></div></div>
+
+  ${(()=>{
+    // ── CONCILIAÇÃO BANCÁRIA (OFX vs CA) ──────────────────────────────────
+    const txsOFX=OFX_DATA?.transactions?.length?OFX_DATA.transactions:null;
+    if(!txsOFX)return`<div class="panel" style="opacity:.6"><div class="pt">🏦 Conciliação Bancária</div>
+      <div style="padding:16px;color:var(--muted);font-size:13px;text-align:center">
+        Carregue o extrato OFX (botão 🏦 Extrato OFX) para comparar saldo do banco com o sistema CA.
+      </div></div>`;
+
+    // Agrupa OFX por mês
+    const ofxMeses={};
+    txsOFX.forEach(t=>{
+      const m=toYYYYMM(t.date);if(!m)return;
+      if(!ofxMeses[m])ofxMeses[m]={e:0,s:0};
+      if(t.amount>0)ofxMeses[m].e+=t.amount;
+      else ofxMeses[m].s+=Math.abs(t.amount);
+    });
+
+    // Calcula saldo acumulado OFX a partir de Dez/25
+    let acOFX=SALDO_INICIAL_DEZ;
+    const ofxRows=Object.keys(ofxMeses).sort().map(m=>{
+      const sm=ofxMeses[m].e-ofxMeses[m].s;
+      acOFX+=sm;
+      return{m,e:ofxMeses[m].e,s:ofxMeses[m].s,sm,ac:acOFX};
+    });
+
+    // Compara com CA: pega saldo acumulado de cada mês no fcData
+    const mesesConc=[...new Set([...ofxRows.map(r=>r.m),...reais.map(r=>r.mes)])].sort();
+
+    const rows=mesesConc.map(m=>{
+      const ofx=ofxRows.find(r=>r.m===m);
+      const ca=reais.find(r=>r.mes===m);
+      const acOFX_m=ofx?.ac??null;
+      const acCA_m=ca?.ac??null;
+      const diff=acOFX_m!==null&&acCA_m!==null?acOFX_m-acCA_m:null;
+      const ok=diff!==null&&Math.abs(diff)<1;
+      return`<tr>
+        <td class="b">${monthLabel(m)}</td>
+        <td class="r mn" style="color:var(--green)">${ofx?fR(ofx.e):"—"}</td>
+        <td class="r mn" style="color:var(--red)">${ofx?fR(ofx.s):"—"}</td>
+        <td class="r mn b" style="color:${acOFX_m!==null?(acOFX_m>=0?"var(--green)":"var(--red)"):"var(--muted)"}">${acOFX_m!==null?fR(acOFX_m):"—"}</td>
+        <td class="r mn b" style="color:${acCA_m!==null?(acCA_m>=0?"var(--green)":"var(--red)"):"var(--muted)"}">${acCA_m!==null?fR(acCA_m):"—"}</td>
+        <td class="r mn b" style="color:${diff===null?"var(--muted)":ok?"var(--green)":"var(--red)"}">${diff!==null?fR(diff):"—"}</td>
+        <td class="r"><span class="bdg ${diff===null?"":"ok"===(ok?"ok":"")?(ok?"bg":"br"):"br"}">${diff===null?"—":ok?"✅ OK":"⚠ Diferença"}</span></td>
+      </tr>`;
+    }).join("");
+
+    return`<div class="panel"><div class="pt">🏦 Conciliação Bancária <span class="pt-badge">${ofxRows.length} meses OFX</span></div>
+    <div class="src-info">Compara saldo acumulado do extrato bancário (OFX) com o sistema Conta Azul · Diferença ideal = R$ 0</div>
+    <div class="tw"><table style="width:100%"><thead><tr>
+      <th>Mês</th>
+      <th class="r" style="color:var(--green)">↑ OFX Entrada</th>
+      <th class="r" style="color:var(--red)">↓ OFX Saída</th>
+      <th class="r">Saldo OFX</th>
+      <th class="r">Saldo CA</th>
+      <th class="r">Diferença</th>
+      <th class="r">Status</th>
+    </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  })()}
+  `;
 }
 
 function renderInadimp(){
