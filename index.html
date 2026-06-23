@@ -960,19 +960,32 @@ function processData(){
         const cpFut=CA_DATA?(CA_DATA.cp||[]).map(normalizarCPfuture).filter(r=>r&&r.mes===ms):[];
         const caE=crFut.reduce((a,r)=>a+r.aberto,0);
         const caS=cpFut.reduce((a,r)=>a+r.aberto,0);
-        let e,s,fonte;
+        let e,s,fonte,rep=0,com=0,adm=0,fin=0,rend=0,emp=0,imp=0;
         if(caE>0||caS>0){
-          // Usa dados reais do CA para meses futuros já lançados
-          e=caE; s=caS; fonte="ca_prev";
+          // Usa dados reais do CA — breakdown por grupo
+          e=caE;
+          rep=cpFut.filter(r=>r.grupo==="repasse").reduce((a,r)=>a+r.aberto,0);
+          com=cpFut.filter(r=>r.grupo==="comercial").reduce((a,r)=>a+r.aberto,0);
+          adm=cpFut.filter(r=>r.grupo==="administrativo").reduce((a,r)=>a+r.aberto,0);
+          fin=cpFut.filter(r=>r.grupo==="financeiro").reduce((a,r)=>a+r.aberto,0);
+          rend=cpFut.filter(r=>r.grupo==="rendimento").reduce((a,r)=>a+r.aberto,0);
+          emp=cpFut.filter(r=>r.grupo==="emprestimo").reduce((a,r)=>a+r.aberto,0);
+          imp=cpFut.filter(r=>r.grupo==="imposto").reduce((a,r)=>a+r.aberto,0);
+          s=rep+com+adm+fin+emp+imp;
+          fonte="ca_prev";
         } else {
           // Fallback: média móvel dos últimos 3 meses
           const ultimos3=buffer.slice(-3);
           e=ultimos3.reduce((a,r)=>a+r.e,0)/ultimos3.length;
           s=ultimos3.reduce((a,r)=>a+r.s,0)/ultimos3.length;
+          rep=ultimos3.reduce((a,r)=>a+(r.rep||0),0)/ultimos3.length;
+          com=ultimos3.reduce((a,r)=>a+(r.com||0),0)/ultimos3.length;
+          adm=ultimos3.reduce((a,r)=>a+(r.adm||0),0)/ultimos3.length;
+          fin=ultimos3.reduce((a,r)=>a+(r.fin||0),0)/ultimos3.length;
           fonte="media";
         }
-        const sm=e-s; ac2+=sm;
-        const novo={m:monthLabel(ms),mes:ms,e,s,sm,ac:ac2,projecao:true,fonte};
+        const sm=e-s+rend; ac2+=sm;
+        const novo={m:monthLabel(ms),mes:ms,e,s,sm,ac:ac2,projecao:true,fonte,rep,com,adm,fin,rend,emp,imp};
         fcData.push(novo);
         buffer.push(novo);
       }
