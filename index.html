@@ -214,12 +214,13 @@ function normalizarCRfuture(item){
 function normalizarCPfuture(item){
   if(isTransfer(item))return null;
   const cat=(item.categorias?.[0]?.nome||item.descricao||"");
-  if(getGrupoCp(cat)==="imposto")return null;
+  const grupo=getGrupoCp(cat);
+  if(grupo==="imposto")return null;
   const aberto=toNum(item.total||0)-toNum(item.pago||0);
   if(aberto<=0)return null;
   const mes=toYYYYMM(item.data_vencimento);
   if(!mes)return null;
-  return{mes,cat,pago:0,original:aberto,aberto};
+  return{mes,cat,grupo,pago:0,original:aberto,aberto};
 }
 
 // ── DRE CATEGORY GROUPING (based on real Conta Azul categories) ──
