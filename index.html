@@ -1407,7 +1407,7 @@ function renderDREMulti(meses, hasExcel){
 
   ${FC_MODE==="ambos"?(()=>{
     // Tabela comparativa Realizado vs Previsto
-    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort().filter(m=>!m.endsWith("-12"));
+    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort();
     const rows=allMesesComp.map(m=>{
       const r=allFcReal.find(x=>x.mes===m);
       const p=allFcPrev.find(x=>x.mes===m);
@@ -1666,7 +1666,7 @@ function renderDREbyCostCenter(d){
 
   ${FC_MODE==="ambos"?(()=>{
     // Tabela comparativa Realizado vs Previsto
-    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort().filter(m=>!m.endsWith("-12"));
+    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort();
     const rows=allMesesComp.map(m=>{
       const r=allFcReal.find(x=>x.mes===m);
       const p=allFcPrev.find(x=>x.mes===m);
@@ -2010,7 +2010,7 @@ ${d.disciplinas.slice(0,12).map(x=>`<span style="display:flex;align-items:center
 
   ${FC_MODE==="ambos"?(()=>{
     // Tabela comparativa Realizado vs Previsto
-    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort().filter(m=>!m.endsWith("-12"));
+    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort();
     const rows=allMesesComp.map(m=>{
       const r=allFcReal.find(x=>x.mes===m);
       const p=allFcPrev.find(x=>x.mes===m);
@@ -2120,7 +2120,7 @@ function renderCat(){
 
   ${FC_MODE==="ambos"?(()=>{
     // Tabela comparativa Realizado vs Previsto
-    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort().filter(m=>!m.endsWith("-12"));
+    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort();
     const rows=allMesesComp.map(m=>{
       const r=allFcReal.find(x=>x.mes===m);
       const p=allFcPrev.find(x=>x.mes===m);
@@ -2301,7 +2301,7 @@ function renderFluxo(){
 
   ${FC_MODE==="ambos"?(()=>{
     // Tabela comparativa Realizado vs Previsto
-    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort().filter(m=>!m.endsWith("-12"));
+    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort();
     const rows=allMesesComp.map(m=>{
       const r=allFcReal.find(x=>x.mes===m);
       const p=allFcPrev.find(x=>x.mes===m);
