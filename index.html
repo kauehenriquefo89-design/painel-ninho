@@ -202,6 +202,28 @@ function calcImpostos(rb){
   return{pis:ded.pis,cofins:ded.cofins,iss:ded.iss,csll:tri.csll/3,irpj:tri.irpj/3,adicional:tri.adicional/3,total:ded.total+tri.total/3};
 }
 
+// ── NORMALIZADORES PARA PREVISTO (todos os lançamentos, pagos ou não) ────────
+function normalizarCRprevisto(item){
+  if(isTransfer(item))return null;
+  const total=toNum(item.total||0);
+  if(total<=0)return null;
+  const mes=toYYYYMM(item.data_vencimento||item.data_competencia);
+  if(!mes)return null;
+  const cat=item.categorias?.[0]?.nome||item.descricao||"";
+  return{mes,cat,e:total};
+}
+function normalizarCPprevisto(item){
+  if(isTransfer(item))return null;
+  const cat=item.categorias?.[0]?.nome||item.descricao||"";
+  const grupo=getGrupoCp(cat);
+  if(grupo==="imposto")return null;
+  const total=toNum(item.total||0);
+  if(total<=0)return null;
+  const mes=toYYYYMM(item.data_vencimento||item.data_competencia);
+  if(!mes)return null;
+  return{mes,cat,grupo,s:total};
+}
+
 // ── NORMALIZADORES PARA FLUXO DE CAIXA PREVISTO (itens futuros) ─────────────
 function normalizarCRfuture(item){
   if(isTransfer(item))return null;
@@ -945,6 +967,27 @@ function processData(){
       return{m:monthLabel(m),mes:m,e,s,sm,ac:acum,fonte:"ca",rep,com,adm,fin,rend,emp,imp};
     });
   }  // end FC build
+
+  // ── FLUXO PREVISTO: todos os lançamentos por data_vencimento ──────────────
+  const crPrev=CA_DATA?(CA_DATA.cr||[]).map(normalizarCRprevisto).filter(r=>r&&r.mes):[];
+  const cpPrev=CA_DATA?(CA_DATA.cp||[]).map(normalizarCPprevisto).filter(r=>r&&r.mes):[];
+  const prevMeses=[...new Set([...crPrev,...cpPrev].map(r=>r.mes).filter(Boolean))].sort();
+  let acumPrev=SALDO_INICIAL_DEZ;
+  const fcDataPrevisto=prevMeses.map(m=>{
+    const crM=crPrev.filter(r=>r.mes===m);
+    const cpM=cpPrev.filter(r=>r.mes===m);
+    const e=crM.reduce((a,r)=>a+r.e,0);
+    const rep=cpM.filter(r=>r.grupo==="repasse").reduce((a,r)=>a+r.s,0);
+    const com=cpM.filter(r=>r.grupo==="comercial").reduce((a,r)=>a+r.s,0);
+    const adm=cpM.filter(r=>r.grupo==="administrativo").reduce((a,r)=>a+r.s,0);
+    const fin=cpM.filter(r=>r.grupo==="financeiro").reduce((a,r)=>a+r.s,0);
+    const rend=cpM.filter(r=>r.grupo==="rendimento").reduce((a,r)=>a+r.s,0);
+    const emp=cpM.filter(r=>r.grupo==="emprestimo").reduce((a,r)=>a+r.s,0);
+    const s=rep+com+adm+fin+emp;
+    const sm=e-s+rend; acumPrev+=sm;
+    return{m:monthLabel(m),mes:m,e,s,sm,ac:acumPrev,fonte:"prev",rep,com,adm,fin,rend,emp,imp:0};
+  });
+
   // Projeção: CA real (vencimentos futuros) ou média móvel se não houver
   if(fcData.length){
     const reais=fcData.filter(r=>!r.projecao&&r.e>0);
@@ -997,7 +1040,7 @@ function processData(){
   // Isso garante que o TOTAL = exatamente a soma dos meses no seletor
   MESES=mesesVisiveis;
   if(CUR_MES!=="TOTAL"&&!MESES.includes(CUR_MES))CUR_MES="TOTAL";
-  APP={byMes,allMeses,mesesVisiveis,fcData,atRows,crRows:cr,cpRows:cp};
+  APP={byMes,allMeses,mesesVisiveis,fcData,fcDataPrevisto,atRows,crRows:cr,cpRows:cp};
   buildMesBar();updateHeaderKPIs();updateSyncBadge(true);render();
 }
 
@@ -1028,6 +1071,7 @@ const splashHTML=()=>`<div class="splash"><img class="splash-logo" src="data:ima
 
 // ── DRE RENDERER ──────────────────────────────────────────────────────────
 let DRE_MODE = "normal";
+let FC_MODE = "realizado"; // "realizado" | "previsto" | "ambos"
 // Sort state per table: {tableId: {col, dir}}
 const SORT_STATE={};
 function sortTable(tableId, col, dir){
@@ -1361,6 +1405,41 @@ function renderDREMulti(meses, hasExcel){
   ${row("= LUCRO LÍQUIDO",c=>c.ll,null,true)}
   </tbody></table></div></div>
 
+  ${FC_MODE==="ambos"?(()=>{
+    // Tabela comparativa Realizado vs Previsto
+    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort().filter(m=>!m.endsWith("-12"));
+    const rows=allMesesComp.map(m=>{
+      const r=allFcReal.find(x=>x.mes===m);
+      const p=allFcPrev.find(x=>x.mes===m);
+      const difE=r&&p?r.e-p.e:null;
+      const difS=r&&p?r.s-p.s:null;
+      const difAc=r&&p?r.ac-p.ac:null;
+      return`<tr>
+        <td class="b">${monthLabel(m)}</td>
+        <td class="r mn gn">${r?fR(r.e):"—"}</td>
+        <td class="r mn" style="color:var(--muted)">${p?fR(p.e):"—"}</td>
+        <td class="r mn rd">${r?fR(r.s):"—"}</td>
+        <td class="r mn" style="color:var(--muted)">${p?fR(p.s):"—"}</td>
+        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
+        <td class="r mn b" style="color:${p?.ac>=0?"var(--green)":"var(--red)"}">${p?fR(p.ac):"—"}</td>
+      </tr>`;
+    }).join("");
+    return`<div class="panel"><div class="pt">📊 Realizado vs Previsto</div>
+    <div class="tw" style="overflow-x:auto"><table style="width:100%;min-width:700px"><thead>
+      <tr>
+        <th rowspan="2">Mês</th>
+        <th colspan="2" class="r" style="background:rgba(34,197,94,.1)">Receitas</th>
+        <th colspan="2" class="r" style="background:rgba(239,68,68,.1)">Saídas</th>
+        <th colspan="2" class="r" style="background:rgba(99,102,241,.1)">Saldo Acumulado</th>
+      </tr>
+      <tr>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+      </tr>
+    </thead><tbody>${rows}</tbody></table></div></div>`;
+  })():""}
+
   ${(()=>{
     // ── CONCILIAÇÃO BANCÁRIA (OFX vs CA) ──────────────────────────────────
     const txsOFX=OFX_DATA?.transactions?.length?OFX_DATA.transactions:null;
@@ -1585,6 +1664,41 @@ function renderDREbyCostCenter(d){
   ${fRow(tot,true)}
   </tbody></table></div></div>
 
+  ${FC_MODE==="ambos"?(()=>{
+    // Tabela comparativa Realizado vs Previsto
+    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort().filter(m=>!m.endsWith("-12"));
+    const rows=allMesesComp.map(m=>{
+      const r=allFcReal.find(x=>x.mes===m);
+      const p=allFcPrev.find(x=>x.mes===m);
+      const difE=r&&p?r.e-p.e:null;
+      const difS=r&&p?r.s-p.s:null;
+      const difAc=r&&p?r.ac-p.ac:null;
+      return`<tr>
+        <td class="b">${monthLabel(m)}</td>
+        <td class="r mn gn">${r?fR(r.e):"—"}</td>
+        <td class="r mn" style="color:var(--muted)">${p?fR(p.e):"—"}</td>
+        <td class="r mn rd">${r?fR(r.s):"—"}</td>
+        <td class="r mn" style="color:var(--muted)">${p?fR(p.s):"—"}</td>
+        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
+        <td class="r mn b" style="color:${p?.ac>=0?"var(--green)":"var(--red)"}">${p?fR(p.ac):"—"}</td>
+      </tr>`;
+    }).join("");
+    return`<div class="panel"><div class="pt">📊 Realizado vs Previsto</div>
+    <div class="tw" style="overflow-x:auto"><table style="width:100%;min-width:700px"><thead>
+      <tr>
+        <th rowspan="2">Mês</th>
+        <th colspan="2" class="r" style="background:rgba(34,197,94,.1)">Receitas</th>
+        <th colspan="2" class="r" style="background:rgba(239,68,68,.1)">Saídas</th>
+        <th colspan="2" class="r" style="background:rgba(99,102,241,.1)">Saldo Acumulado</th>
+      </tr>
+      <tr>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+      </tr>
+    </thead><tbody>${rows}</tbody></table></div></div>`;
+  })():""}
+
   ${(()=>{
     // ── CONCILIAÇÃO BANCÁRIA (OFX vs CA) ──────────────────────────────────
     const txsOFX=OFX_DATA?.transactions?.length?OFX_DATA.transactions:null;
@@ -1763,6 +1877,7 @@ function getAggData(){
   return{...base,disciplinas:aggDisc,familias:aggFam,profissionais};
 }
 
+window.setFCMode=function(mode){FC_MODE=mode;renderFluxo();};
 window.setDreMode=function(mode){DRE_MODE=mode;renderDRE()};
 window.dreToggleMes=function(m){
   const i=MESES_SEL.indexOf(m);
@@ -1893,6 +2008,41 @@ ${d.disciplinas.slice(0,12).map(x=>`<span style="display:flex;align-items:center
   ${d.disciplinas.map(x=>`<tr><td class="b" style="border-left:3px solid ${getProcColor(x.n)};padding-left:8px">${x.n}</td><td class="r mn">${fR(x.rl)}</td><td class="r mn rd">${fR(x.rep)}</td><td class="r">${bdg(x.repP)}</td><td class="r mn b" style="color:${clr(x.mc)}">${fR(x.mc)}</td><td class="r">${bdg(x.mcP)}</td><td class="r mn" style="color:var(--muted)">${fR(x.imp)}</td><td class="r mn b" style="color:${clr(x.ll)}">${fR(x.ll)}</td><td class="r">${bdg(x.llP)}</td><td class="r mn">${fR(x.tAt)}</td><td class="r mn">${fR(x.tPac||0)}</td><td class="r mn">${x.at}</td></tr>`).join("")}
   </tbody></table></div></div>
 
+  ${FC_MODE==="ambos"?(()=>{
+    // Tabela comparativa Realizado vs Previsto
+    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort().filter(m=>!m.endsWith("-12"));
+    const rows=allMesesComp.map(m=>{
+      const r=allFcReal.find(x=>x.mes===m);
+      const p=allFcPrev.find(x=>x.mes===m);
+      const difE=r&&p?r.e-p.e:null;
+      const difS=r&&p?r.s-p.s:null;
+      const difAc=r&&p?r.ac-p.ac:null;
+      return`<tr>
+        <td class="b">${monthLabel(m)}</td>
+        <td class="r mn gn">${r?fR(r.e):"—"}</td>
+        <td class="r mn" style="color:var(--muted)">${p?fR(p.e):"—"}</td>
+        <td class="r mn rd">${r?fR(r.s):"—"}</td>
+        <td class="r mn" style="color:var(--muted)">${p?fR(p.s):"—"}</td>
+        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
+        <td class="r mn b" style="color:${p?.ac>=0?"var(--green)":"var(--red)"}">${p?fR(p.ac):"—"}</td>
+      </tr>`;
+    }).join("");
+    return`<div class="panel"><div class="pt">📊 Realizado vs Previsto</div>
+    <div class="tw" style="overflow-x:auto"><table style="width:100%;min-width:700px"><thead>
+      <tr>
+        <th rowspan="2">Mês</th>
+        <th colspan="2" class="r" style="background:rgba(34,197,94,.1)">Receitas</th>
+        <th colspan="2" class="r" style="background:rgba(239,68,68,.1)">Saídas</th>
+        <th colspan="2" class="r" style="background:rgba(99,102,241,.1)">Saldo Acumulado</th>
+      </tr>
+      <tr>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+      </tr>
+    </thead><tbody>${rows}</tbody></table></div></div>`;
+  })():""}
+
   ${(()=>{
     // ── CONCILIAÇÃO BANCÁRIA (OFX vs CA) ──────────────────────────────────
     const txsOFX=OFX_DATA?.transactions?.length?OFX_DATA.transactions:null;
@@ -1968,6 +2118,41 @@ function renderCat(){
   ${d.categorias.map(c=>`<tr><td class="b">${c.n}</td><td class="r mn">${fR(c.faturado)}</td><td class="r mn gn">${fR(c.recebido)}</td><td class="r mn rd">${fR(c.aberto)}</td><td class="r">${bdg(c.faturado>0?c.recebido/c.faturado:0)}</td></tr>`).join("")}
   </tbody></table></div></div>
 
+  ${FC_MODE==="ambos"?(()=>{
+    // Tabela comparativa Realizado vs Previsto
+    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort().filter(m=>!m.endsWith("-12"));
+    const rows=allMesesComp.map(m=>{
+      const r=allFcReal.find(x=>x.mes===m);
+      const p=allFcPrev.find(x=>x.mes===m);
+      const difE=r&&p?r.e-p.e:null;
+      const difS=r&&p?r.s-p.s:null;
+      const difAc=r&&p?r.ac-p.ac:null;
+      return`<tr>
+        <td class="b">${monthLabel(m)}</td>
+        <td class="r mn gn">${r?fR(r.e):"—"}</td>
+        <td class="r mn" style="color:var(--muted)">${p?fR(p.e):"—"}</td>
+        <td class="r mn rd">${r?fR(r.s):"—"}</td>
+        <td class="r mn" style="color:var(--muted)">${p?fR(p.s):"—"}</td>
+        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
+        <td class="r mn b" style="color:${p?.ac>=0?"var(--green)":"var(--red)"}">${p?fR(p.ac):"—"}</td>
+      </tr>`;
+    }).join("");
+    return`<div class="panel"><div class="pt">📊 Realizado vs Previsto</div>
+    <div class="tw" style="overflow-x:auto"><table style="width:100%;min-width:700px"><thead>
+      <tr>
+        <th rowspan="2">Mês</th>
+        <th colspan="2" class="r" style="background:rgba(34,197,94,.1)">Receitas</th>
+        <th colspan="2" class="r" style="background:rgba(239,68,68,.1)">Saídas</th>
+        <th colspan="2" class="r" style="background:rgba(99,102,241,.1)">Saldo Acumulado</th>
+      </tr>
+      <tr>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+      </tr>
+    </thead><tbody>${rows}</tbody></table></div></div>`;
+  })():""}
+
   ${(()=>{
     // ── CONCILIAÇÃO BANCÁRIA (OFX vs CA) ──────────────────────────────────
     const txsOFX=OFX_DATA?.transactions?.length?OFX_DATA.transactions:null;
@@ -2031,7 +2216,20 @@ function renderCat(){
 
 function renderFluxo(){
   const el=document.getElementById("sec-fluxo");if(!APP){el.innerHTML=splashHTML();return;}
-  let allFc=APP.fcData||[];if(!allFc.length){el.innerHTML='<div class="no-data">Dados de fluxo não disponíveis.</div>';return;}
+
+  // Toggle Realizado/Previsto/Ambos
+  const fcToggle=`<div class="dre-toggle" style="margin-bottom:12px">
+    <button class="dre-tb${FC_MODE==="realizado"?" a":""}" onclick="setFCMode('realizado')">✅ Realizado</button>
+    <button class="dre-tb${FC_MODE==="previsto"?" a":""}" onclick="setFCMode('previsto')">📋 Previsto</button>
+    <button class="dre-tb${FC_MODE==="ambos"?" a":""}" onclick="setFCMode('ambos')">📊 Ambos</button>
+  </div>`;
+
+  // Seleciona fonte de dados conforme modo
+  const allFcReal=APP.fcData||[];
+  const allFcPrev=APP.fcDataPrevisto||[];
+  let allFc=FC_MODE==="previsto"?allFcPrev:allFcReal;
+  if(!allFc.length){el.innerHTML=fcToggle+`<div class="no-data">Dados de fluxo não disponíveis.</div>`;return;}
+
   // Aplica filtro de período no fluxo
   let fc=allFc;
   if(dtFrom||dtTo||CUR_MES!=="TOTAL"){
@@ -2047,7 +2245,7 @@ function renderFluxo(){
   }
   const reais=fc.filter(r=>!r.projecao),proj=allFc.filter(r=>r.projecao);
   const te=reais.reduce((a,r)=>a+r.e,0),ts=reais.reduce((a,r)=>a+r.s,0),projIdx=reais.length;
-  el.innerHTML=`
+  el.innerHTML=fcToggle+`
   <div class="cards">
     ${kCard("Saldo Inicial (Dez/25)",fR(SALDO_INICIAL_DEZ),"","var(--muted)","Base do período")}
     ${kCard("Recebido",fR(te),"","var(--green)","Valores quitados")}
@@ -2060,8 +2258,8 @@ function renderFluxo(){
   <div class="cwrap">${barG(fc.map(r=>r.m),[{nm:"Entradas",v:fc.map(r=>r.e),c:"var(--green)"},{nm:"Saídas",v:fc.map(r=>r.s),c:"var(--red)"}],760)}</div></div>
   <div class="panel"><div class="pt">Saldo Acumulado</div>
   <div class="cwrap">${areaC(fc.map(r=>r.m),fc.map(r=>r.ac),"var(--brand)",760,170,projIdx)}</div></div>
-  <div class="src-info">💰 Conta Azul · datas reais de pagamento/recebimento · categorizado por grupo · Saldo inicial Dez/25: R$ 40.003 · Projeção = CA ou média móvel</div>
-  <div class="panel"><div class="pt">Detalhamento — Realizado (valores quitados/recebidos)</div>
+  <div class="src-info">💰 ${FC_MODE==="realizado"?"✅ Realizado: datas reais de pagamento/recebimento":FC_MODE==="previsto"?"📋 Previsto: datas de vencimento · total do lançamento":"📊 Realizado + Previsto"} · Conta Azul · Saldo inicial Dez/25: R$ 40.003</div>
+  <div class="panel"><div class="pt">Detalhamento — ${FC_MODE==="realizado"?"✅ Realizado (valores quitados/recebidos)":FC_MODE==="previsto"?"📋 Previsto (datas de vencimento)":"📊 Realizado"}</div>
   <div class="tw"><table style="width:100%;min-width:800px"><thead><tr>
     <th>Mês</th>
     <th class="r" style="color:var(--green)">↑ Receitas</th>
@@ -2100,6 +2298,41 @@ function renderFluxo(){
     </tr>`;
   }).join("")}
   </tbody></table></div></div>
+
+  ${FC_MODE==="ambos"?(()=>{
+    // Tabela comparativa Realizado vs Previsto
+    const allMesesComp=[...new Set([...allFcReal.map(r=>r.mes),...allFcPrev.map(r=>r.mes)])].sort().filter(m=>!m.endsWith("-12"));
+    const rows=allMesesComp.map(m=>{
+      const r=allFcReal.find(x=>x.mes===m);
+      const p=allFcPrev.find(x=>x.mes===m);
+      const difE=r&&p?r.e-p.e:null;
+      const difS=r&&p?r.s-p.s:null;
+      const difAc=r&&p?r.ac-p.ac:null;
+      return`<tr>
+        <td class="b">${monthLabel(m)}</td>
+        <td class="r mn gn">${r?fR(r.e):"—"}</td>
+        <td class="r mn" style="color:var(--muted)">${p?fR(p.e):"—"}</td>
+        <td class="r mn rd">${r?fR(r.s):"—"}</td>
+        <td class="r mn" style="color:var(--muted)">${p?fR(p.s):"—"}</td>
+        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
+        <td class="r mn b" style="color:${p?.ac>=0?"var(--green)":"var(--red)"}">${p?fR(p.ac):"—"}</td>
+      </tr>`;
+    }).join("");
+    return`<div class="panel"><div class="pt">📊 Realizado vs Previsto</div>
+    <div class="tw" style="overflow-x:auto"><table style="width:100%;min-width:700px"><thead>
+      <tr>
+        <th rowspan="2">Mês</th>
+        <th colspan="2" class="r" style="background:rgba(34,197,94,.1)">Receitas</th>
+        <th colspan="2" class="r" style="background:rgba(239,68,68,.1)">Saídas</th>
+        <th colspan="2" class="r" style="background:rgba(99,102,241,.1)">Saldo Acumulado</th>
+      </tr>
+      <tr>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+      </tr>
+    </thead><tbody>${rows}</tbody></table></div></div>`;
+  })():""}
 
   ${(()=>{
     // ── CONCILIAÇÃO BANCÁRIA (OFX vs CA) ──────────────────────────────────
