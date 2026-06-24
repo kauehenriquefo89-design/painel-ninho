@@ -1416,12 +1416,12 @@ function renderDREMulti(meses, hasExcel){
       const difAc=r&&p?r.ac-p.ac:null;
       return`<tr>
         <td class="b">${monthLabel(m)}</td>
-        <td class="r mn gn">${r?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--muted)">${p?fR(p.e):"—"}</td>
-        <td class="r mn rd">${r?fR(r.s):"—"}</td>
+        <td class="r mn gn">${r?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--muted)">${p?fR(p.s):"—"}</td>
-        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
+        <td class="r mn rd">${r?fR(r.s):"—"}</td>
         <td class="r mn b" style="color:${p?.ac>=0?"var(--green)":"var(--red)"}">${p?fR(p.ac):"—"}</td>
+        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
       </tr>`;
     }).join("");
     return`<div class="panel"><div class="pt">📊 Realizado vs Previsto</div>
@@ -1433,9 +1433,9 @@ function renderDREMulti(meses, hasExcel){
         <th colspan="2" class="r" style="background:rgba(99,102,241,.1)">Saldo Acumulado</th>
       </tr>
       <tr>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
       </tr>
     </thead><tbody>${rows}</tbody></table></div></div>`;
   })():""}
@@ -1675,12 +1675,12 @@ function renderDREbyCostCenter(d){
       const difAc=r&&p?r.ac-p.ac:null;
       return`<tr>
         <td class="b">${monthLabel(m)}</td>
-        <td class="r mn gn">${r?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--muted)">${p?fR(p.e):"—"}</td>
-        <td class="r mn rd">${r?fR(r.s):"—"}</td>
+        <td class="r mn gn">${r?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--muted)">${p?fR(p.s):"—"}</td>
-        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
+        <td class="r mn rd">${r?fR(r.s):"—"}</td>
         <td class="r mn b" style="color:${p?.ac>=0?"var(--green)":"var(--red)"}">${p?fR(p.ac):"—"}</td>
+        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
       </tr>`;
     }).join("");
     return`<div class="panel"><div class="pt">📊 Realizado vs Previsto</div>
@@ -1692,9 +1692,9 @@ function renderDREbyCostCenter(d){
         <th colspan="2" class="r" style="background:rgba(99,102,241,.1)">Saldo Acumulado</th>
       </tr>
       <tr>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
       </tr>
     </thead><tbody>${rows}</tbody></table></div></div>`;
   })():""}
@@ -2019,12 +2019,12 @@ ${d.disciplinas.slice(0,12).map(x=>`<span style="display:flex;align-items:center
       const difAc=r&&p?r.ac-p.ac:null;
       return`<tr>
         <td class="b">${monthLabel(m)}</td>
-        <td class="r mn gn">${r?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--muted)">${p?fR(p.e):"—"}</td>
-        <td class="r mn rd">${r?fR(r.s):"—"}</td>
+        <td class="r mn gn">${r?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--muted)">${p?fR(p.s):"—"}</td>
-        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
+        <td class="r mn rd">${r?fR(r.s):"—"}</td>
         <td class="r mn b" style="color:${p?.ac>=0?"var(--green)":"var(--red)"}">${p?fR(p.ac):"—"}</td>
+        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
       </tr>`;
     }).join("");
     return`<div class="panel"><div class="pt">📊 Realizado vs Previsto</div>
@@ -2036,9 +2036,9 @@ ${d.disciplinas.slice(0,12).map(x=>`<span style="display:flex;align-items:center
         <th colspan="2" class="r" style="background:rgba(99,102,241,.1)">Saldo Acumulado</th>
       </tr>
       <tr>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
       </tr>
     </thead><tbody>${rows}</tbody></table></div></div>`;
   })():""}
@@ -2129,12 +2129,12 @@ function renderCat(){
       const difAc=r&&p?r.ac-p.ac:null;
       return`<tr>
         <td class="b">${monthLabel(m)}</td>
-        <td class="r mn gn">${r?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--muted)">${p?fR(p.e):"—"}</td>
-        <td class="r mn rd">${r?fR(r.s):"—"}</td>
+        <td class="r mn gn">${r?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--muted)">${p?fR(p.s):"—"}</td>
-        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
+        <td class="r mn rd">${r?fR(r.s):"—"}</td>
         <td class="r mn b" style="color:${p?.ac>=0?"var(--green)":"var(--red)"}">${p?fR(p.ac):"—"}</td>
+        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
       </tr>`;
     }).join("");
     return`<div class="panel"><div class="pt">📊 Realizado vs Previsto</div>
@@ -2146,9 +2146,9 @@ function renderCat(){
         <th colspan="2" class="r" style="background:rgba(99,102,241,.1)">Saldo Acumulado</th>
       </tr>
       <tr>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
       </tr>
     </thead><tbody>${rows}</tbody></table></div></div>`;
   })():""}
@@ -2310,12 +2310,12 @@ function renderFluxo(){
       const difAc=r&&p?r.ac-p.ac:null;
       return`<tr>
         <td class="b">${monthLabel(m)}</td>
-        <td class="r mn gn">${r?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--muted)">${p?fR(p.e):"—"}</td>
-        <td class="r mn rd">${r?fR(r.s):"—"}</td>
+        <td class="r mn gn">${r?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--muted)">${p?fR(p.s):"—"}</td>
-        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
+        <td class="r mn rd">${r?fR(r.s):"—"}</td>
         <td class="r mn b" style="color:${p?.ac>=0?"var(--green)":"var(--red)"}">${p?fR(p.ac):"—"}</td>
+        <td class="r mn b" style="color:${r?.ac>=0?"var(--green)":"var(--red)"}">${r?fR(r.ac):"—"}</td>
       </tr>`;
     }).join("");
     return`<div class="panel"><div class="pt">📊 Realizado vs Previsto</div>
@@ -2327,9 +2327,9 @@ function renderFluxo(){
         <th colspan="2" class="r" style="background:rgba(99,102,241,.1)">Saldo Acumulado</th>
       </tr>
       <tr>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
-        <th class="r" style="font-size:10px">Real</th><th class="r" style="font-size:10px">Prev.</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
+        <th class="r" style="font-size:10px">Prev.</th><th class="r" style="font-size:10px">Real</th>
       </tr>
     </thead><tbody>${rows}</tbody></table></div></div>`;
   })():""}
