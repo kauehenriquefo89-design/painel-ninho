@@ -441,10 +441,11 @@ function normalizarCRfc(item){
   const cat=item.categorias?.[0]?.nome||item.descricao||"Sem categoria";
   const recebido=toNum(item.pago||0);
   const faturado=toNum(item.total||0);
-  // FC REALIZADO: usa data_pagamento (data real do recebimento)
-  // Se não tem data_pagamento ou valor pago = 0, não entra no fluxo
+  // FC REALIZADO: usa SOMENTE data_pagamento (data real do recebimento)
+  // Se não tem valor recebido ou data de pagamento, não entra no realizado
   if(recebido<=0)return null;
-  const mes=toYYYYMM(item.data_pagamento||item.data_vencimento);
+  if(!item.data_pagamento)return null; // sem data real → não é realizado
+  const mes=toYYYYMM(item.data_pagamento);
   if(!mes)return null;
   return{mes,cat,recebido,faturado,aberto:faturado-recebido};
 }
@@ -453,10 +454,10 @@ function normalizarCPfc(item){
   const cat=item.categorias?.[0]?.nome||item.descricao||"Sem categoria";
   const pago=toNum(item.pago||0);
   const original=toNum(item.total||0);
-  // FC REALIZADO: usa data_pagamento (data real do pagamento)
-  // Se não tem valor pago, não entra no fluxo
+  // FC REALIZADO: usa SOMENTE data_pagamento (data real do pagamento)
   if(pago<=0)return null;
-  const mes=toYYYYMM(item.data_pagamento||item.data_vencimento);
+  if(!item.data_pagamento)return null; // sem data real → não é realizado
+  const mes=toYYYYMM(item.data_pagamento);
   if(!mes)return null;
   const grupo=getGrupoCp(cat);
   return{mes,cat,grupo,pago,original,aberto:original-pago};
