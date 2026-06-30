@@ -444,8 +444,9 @@ function normalizarCRfc(item){
   // FC REALIZADO: pago>0 + vencimento <= mês atual
   if(recebido<=0)return null;
   const mes=toYYYYMM(item.data_vencimento||item.data_competencia);
-  if(!mes||mes>new Date().toISOString().slice(0,7))return null; // exclui futuros
   if(!mes)return null;
+  const _hj=new Date();const hoje=_hj.getFullYear()+"-"+String(_hj.getMonth()+1).padStart(2,"0");
+  if(mes>hoje)return null; // exclui futuros
   return{mes,cat,recebido,faturado,aberto:faturado-recebido};
 }
 function normalizarCPfc(item){
@@ -456,7 +457,9 @@ function normalizarCPfc(item){
   // FC REALIZADO: pago>0 + vencimento <= mês atual
   if(pago<=0)return null;
   const mes=toYYYYMM(item.data_vencimento||item.data_competencia);
-  if(!mes||mes>new Date().toISOString().slice(0,7))return null; // exclui futuros
+  if(!mes)return null;
+  const _hj=new Date();const hoje=_hj.getFullYear()+"-"+String(_hj.getMonth()+1).padStart(2,"0");
+  if(mes>hoje)return null; // exclui futuros
   if(!mes)return null;
   const grupo=getGrupoCp(cat);
   return{mes,cat,grupo,pago,original,aberto:original-pago};
