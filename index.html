@@ -1832,7 +1832,7 @@ function renderProf(){
 function renderDisc(){
   const el=document.getElementById("sec-disc");if(!APP){el.innerHTML=splashHTML();return;}
   if(!XL_DATA){el.innerHTML=`<div class="excel-needed">📊 <b>Conecte o Excel</b> para atualizar · <button onclick="connectExcel()" style="border:none;background:var(--brand);color:#fff;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit">Selecionar arquivo</button></div>`;return;}
-  const d=getActiveData();if(!d.disciplinas||!d.disciplinas.length){el.innerHTML='<div class="no-data">Nenhum dado no período.</div>';return;}
+  const d=getAggData()||getActiveData();if(!d.disciplinas||!d.disciplinas.length){el.innerHTML='<div class="no-data">Nenhum dado no período.</div>';return;}
   el.innerHTML=`
   <div class="src-info">📊 Fonte: Excel (Relação geral) · Receita = Valor a Receber · Custo Direto = Valor Profissional · Pacientes únicos por procedimento</div>
   <div class="panel"><div class="pt">Receita vs Margem por Procedimento</div>
