@@ -1695,9 +1695,25 @@ function getAggData(){
     return{...d,mc,imp:i.total,ll,mcP:d.rl>0?mc/d.rl:0,repP:d.rl>0?d.rep/d.rl:0,llP:d.rl>0?ll/d.rl:0,tAt:d.at>0?d.rl/d.at:0,tPac:d.pac>0?d.rl/d.pac:0};
   }).sort((a,b)=>b.rl-a.rl);
   const aggFam=Object.values(famMap).map(f=>({...f,tAt:f.at>0?f.rl/f.at:0,tPac:f.pac>0?f.rl/f.pac:0})).sort((a,b)=>b.rl-a.rl);
-  // Base da getActiveData mas com dados agregados
+
+  // Agrega totais do período (soma de cada mês selecionado)
+  let rl=0,rb_excel=0,rep=0,at=0,pac=0;
+  const catMap2={};
+  meses.forEach(m=>{
+    const d=APP.byMes[m];if(!d)return;
+    rl+=d.rl||0; rb_excel+=d.rb_excel||0; rep+=d.rep||0; at+=d.at||0; pac+=d.pac||0;
+    (d.categorias||[]).forEach(c=>{
+      if(!catMap2[c.n])catMap2[c.n]={n:c.n,faturado:0,recebido:0,aberto:0};
+      catMap2[c.n].faturado+=c.faturado;catMap2[c.n].recebido+=c.recebido;catMap2[c.n].aberto+=c.aberto;
+    });
+  });
+  const aggCategorias=Object.values(catMap2).sort((a,b)=>b.faturado-a.faturado);
+
+  // Base da getActiveData mas com totais e detalhes agregados do período
   const base=getActiveData()||{};
-  return{...base,disciplinas:aggDisc,familias:aggFam,profissionais};
+  return{...base,rl,rb_excel,rep,at,pac,
+    tAt:at>0?rl/at:0,tPac:pac>0?rl/pac:0,
+    disciplinas:aggDisc,familias:aggFam,profissionais,categorias:aggCategorias};
 }
 
 window.setFCMode=function(mode){FC_MODE=mode;renderFluxo();};
@@ -2241,12 +2257,12 @@ function buildMesBar(){
 }
 
 function setMesDRE(mes){
-  if(mes==="TOTAL"){MESES_SEL=[];renderDRE();buildMesBar();return;}
+  if(mes==="TOTAL"){MESES_SEL=[];render();buildMesBar();return;}
   const idx=MESES_SEL.indexOf(mes);
   if(idx>=0)MESES_SEL.splice(idx,1);
   else if(MESES_SEL.length<6)MESES_SEL.push(mes);
   MESES_SEL.sort();
-  renderDRE();buildMesBar();
+  render();buildMesBar();
 }
 function updateSourceBar(){
   const hasCA=!!CA_DATA,hasXL=!!XL_DATA;
