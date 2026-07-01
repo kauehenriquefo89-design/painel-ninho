@@ -1530,29 +1530,59 @@ function renderDRECompare(meses){
     return{rb,desc,ded,rl_liq,rep,mb,dc,da,ebitda,rf,ebt,csll_irpj,ll};
   }
   const cols=meses.map(m=>{
-    const fd=fore[m]; if(!fd)return null;
-    const rmd=(real[m]&&(real[m].rb_excel||0)>0)?real[m]:null; // realizado só com receita Excel real
-    return{m,f:deriveDRE(fd),r:rmd?deriveDRE(rmd):null,isReal:!!rmd,fonte:foreFonte[m]};
+    const fMd=fore[m]; if(!fMd)return null;
+    const rMd=(real[m]&&(real[m].rb_excel||0)>0)?real[m]:null; // realizado só com receita Excel real
+    return{m,fMd,rMd,f:deriveDRE(fMd),r:rMd?deriveDRE(rMd):null,isReal:!!rMd,fonte:foreFonte[m]};
   }).filter(Boolean);
   if(!cols.length)return`<div class="no-data">Sem dados para o comparativo</div>`;
-  const nC=cols.length;
-  const rows=[
-    {l:"01 RECEITA BRUTA",f:d=>d.rb,color:"var(--blue)",bold:1},
-    {l:"02 DEDUÇÕES",f:d=>-(d.desc+d.ded),color:"var(--red)"},
-    {l:"= RECEITA LÍQUIDA",f:d=>d.rl_liq,color:"var(--brand)",bold:1,sep:1},
-    {l:"03 REPASSES",f:d=>-d.rep,color:"var(--red)"},
-    {l:"= MARGEM BRUTA",f:d=>d.mb,bold:1,sep:1},
-    {l:"04.1 DESPESAS COMERCIAIS",f:d=>-d.dc,color:"var(--red)"},
-    {l:"04.2 DESPESAS ADMINISTRATIVAS",f:d=>-d.da,color:"var(--red)"},
-    {l:"= EBITDA",f:d=>d.ebitda,bold:1,sep:1},
-    {l:"05 RESULTADO FINANCEIRO",f:d=>d.rf,color:"var(--muted)"},
-    {l:"= EBT (ANTES DOS IMPOSTOS)",f:d=>d.ebt,bold:1},
-    {l:"(–) CSLL/IRPJ",f:d=>-d.csll_irpj,color:"var(--muted)",sep:1},
-    {l:"= LUCRO LÍQUIDO",f:d=>d.ll,bold:1},
-  ];
-  const bl="2px solid var(--border)";
+  const nC=cols.length, bl="2px solid var(--border)";
+
+  // Acessores de categoria (funcionam tanto no previsto quanto no realizado)
+  const getRec=(md,n)=>(md&&md.categorias?(md.categorias.find(x=>x.n===n)||{}).faturado:0)||0;
+  const getCp=(md,n,g)=>(md&&md.cpCategorias?(md.cpCategorias.find(x=>x.n===n&&x.grupo===g)||{}).valor:0)||0;
+  const uni=(arr)=>[...new Set(arr)];
+  const recNames=uni(cols.flatMap(c=>[...(c.fMd.categorias||[]),...(c.rMd?(c.rMd.categorias||[]):[])].map(x=>x.n)));
+  const cpNames=g=>uni(cols.flatMap(c=>[...(c.fMd.cpCategorias||[]),...(c.rMd?(c.rMd.cpCategorias||[]):[])].filter(x=>x.grupo===g).map(x=>x.n)));
+
+  // Monta lista ordenada de linhas: principais (main) intercaladas com subcategorias (sub)
+  const rows=[];
+  let _curPid=null;
+  const M=(l,get,o={})=>{_curPid=o.id||null;rows.push({l,get,main:1,pid:o.id||null,color:o.color,bold:o.bold});};
+  const S=(l,get)=>rows.push({l,get,sub:1,pid:_curPid});
+  const SEP=()=>{_curPid=null;rows.push({sepRow:1});};
+
+  M("01 RECEITA BRUTA",d=>d.rb,{color:"var(--blue)",bold:1,id:"rec"});
+  recNames.forEach(n=>S(n,md=>getRec(md,n)));
+  SEP();
+  M("02 DEDUÇÕES",d=>-(d.desc+d.ded),{color:"var(--red)",id:"ded"});
+  S("PIS 0,65%",md=>-((md.impostos||{}).pis||0));
+  S("COFINS 3,0%",md=>-((md.impostos||{}).cofins||0));
+  S("ISS 5,0%",md=>-((md.impostos||{}).iss||0));
+  M("= RECEITA LÍQUIDA",d=>d.rl_liq,{color:"var(--brand)",bold:1});
+  SEP();
+  M("03 REPASSES",d=>-d.rep,{color:"var(--red)",id:"rep"});
+  cpNames("repasse").forEach(n=>S(n,md=>-getCp(md,n,"repasse")));
+  M("= MARGEM BRUTA",d=>d.mb,{bold:1});
+  SEP();
+  M("04.1 DESPESAS COMERCIAIS",d=>-d.dc,{color:"var(--red)",id:"com"});
+  cpNames("comercial").forEach(n=>S(n,md=>-getCp(md,n,"comercial")));
+  M("04.2 DESPESAS ADMINISTRATIVAS",d=>-d.da,{color:"var(--red)",id:"adm"});
+  cpNames("administrativo").forEach(n=>S(n,md=>-getCp(md,n,"administrativo")));
+  M("= EBITDA",d=>d.ebitda,{bold:1});
+  SEP();
+  M("05 RESULTADO FINANCEIRO",d=>d.rf,{color:"var(--muted)",id:"fin"});
+  cpNames("rendimento").forEach(n=>S(n+" (+)",md=>getCp(md,n,"rendimento")));
+  cpNames("financeiro").forEach(n=>S(n+" (−)",md=>-getCp(md,n,"financeiro")));
+  M("= EBT (ANTES DOS IMPOSTOS)",d=>d.ebt,{bold:1});
+  M("(–) CSLL/IRPJ",d=>-d.csll_irpj,{color:"var(--muted)",id:"imp"});
+  S("CSLL",md=>-((md.impostos||{}).csll||0));
+  S("IRPJ",md=>-((md.impostos||{}).irpj||0));
+  S("IRPJ Adicional",md=>-((md.impostos||{}).adicional||0));
+  SEP();
+  M("= LUCRO LÍQUIDO",d=>d.ll,{bold:1});
+
   // Cabeçalho em 2 níveis
-  let head=`<thead><tr><th rowspan="2" style="min-width:170px;text-align:left;vertical-align:bottom">Linha</th>`;
+  let head=`<thead><tr><th rowspan="2" style="min-width:180px;text-align:left;vertical-align:bottom">Linha</th>`;
   cols.forEach(c=>{
     const badge=c.isReal?"":(c.fonte==="media"?' <span style="font-size:8px;color:var(--brand)">📊</span>':' <span style="font-size:8px;color:var(--brand)">📋</span>');
     head+=`<th colspan="3" class="r" style="border-left:${bl};${c.isReal?"":"opacity:.9"}">${monthLabel(c.m)}${badge}</th>`;
@@ -1560,29 +1590,44 @@ function renderDRECompare(meses){
   head+=`</tr><tr>`;
   cols.forEach(()=>{head+=`<th class="r" style="font-size:9px;color:var(--brand);border-left:${bl};font-weight:600">Prev</th><th class="r" style="font-size:9px;color:var(--text);font-weight:600">Real</th><th class="r" style="font-size:9px;color:var(--muted)">Δ%</th>`;});
   head+=`</tr></thead>`;
+
   const fmtD=(rv,pv)=>{
     if(rv==null||pv==null||pv===0)return`<span style="color:var(--subtle);font-size:9px">—</span>`;
     const d=(rv-pv)/Math.abs(pv), g=(rv-pv)>=0;
     return`<span style="color:${g?"var(--green)":"var(--red)"};font-size:9px">${g?"▲":"▼"}${Math.abs(d*100).toFixed(0)}%</span>`;
   };
+
+  const kidPids=new Set(rows.filter(r=>r.sub).map(r=>r.pid));
   let body="<tbody>";
   rows.forEach(row=>{
-    body+=`<tr><td style="font-weight:${row.bold?700:400};color:${row.color||"var(--text)"};padding-left:8px;font-size:${row.bold?12:11}px">${row.l}</td>`;
+    if(row.sepRow){body+=`<tr class="dsp"><td colspan="${1+nC*3}"></td></tr>`;return;}
+    const sub=row.sub;
+    const hasKids=!sub&&row.pid&&kidPids.has(row.pid);
+    const trAttr=sub?`class="cmp-sub cmp-sub-${row.pid}" style="display:none"`:(hasKids?`class="cmp-main" onclick="cmpDrill('${row.pid}')" style="cursor:pointer"`:"");
+    const icon=hasKids?`<span id="cico-${row.pid}" style="font-size:10px;margin-right:3px;opacity:.55">▶</span>`:"";
+    body+=`<tr ${trAttr}>`;
+    body+=`<td style="${sub?`font-size:10px;color:var(--muted);padding-left:26px`:`font-weight:${row.bold?700:400};color:${row.color||"var(--text)"};padding-left:8px;font-size:${row.bold?12:11}px`}">${sub?"↳ ":icon}${row.l}</td>`;
     cols.forEach(c=>{
-      const pv=row.f(c.f), rv=c.r?row.f(c.r):null;
-      body+=`<td class="r mn" style="border-left:${bl};color:var(--brand);font-size:10px">${fR(pv)}</td>`;
-      body+=`<td class="r mn" style="font-size:10px;color:${row.color||"var(--text)"};font-weight:${row.bold?600:400}">${rv==null?'<span style="color:var(--subtle)">—</span>':fR(rv)}</td>`;
+      const pv = sub ? row.get(c.fMd)       : row.get(c.f);
+      const rv = sub ? (c.rMd?row.get(c.rMd):null) : (c.r?row.get(c.r):null);
+      body+=`<td class="r mn" style="border-left:${bl};color:var(--brand);font-size:${sub?9:10}px${sub?";opacity:.85":""}">${fR(pv)}</td>`;
+      body+=`<td class="r mn" style="font-size:${sub?9:10}px;color:${sub?"var(--muted)":(row.color||"var(--text)")};font-weight:${row.bold?600:400}">${rv==null?'<span style="color:var(--subtle)">—</span>':fR(rv)}</td>`;
       body+=`<td class="r">${fmtD(rv,pv)}</td>`;
     });
     body+=`</tr>`;
-    if(row.sep)body+=`<tr class="dsp"><td colspan="${1+nC*3}"></td></tr>`;
   });
   body+="</tbody>";
+
   return`
-  <div class="src-info">⚖️ Previsto × Realizado · Prev = CA lançado (📋) ou média móvel 3m (📊) · Real = efetivo (Excel + CA) · "—" = mês ainda não realizado</div>
-  <div class="panel"><div class="pt">DRE Previsto × Realizado — ${monthLabel(cols[0].m)} → ${monthLabel(cols[cols.length-1].m)} <span class="pt-badge">Competência</span></div>
-  <div class="tw" style="overflow-x:auto"><table style="width:100%;min-width:${170+nC*170}px">${head}${body}</table></div>
-  <p class="note">ℹ Δ% = (Realizado − Previsto) ÷ |Previsto|. Verde = realizado melhor que o previsto (linhas de custo estão em valores negativos, então "acima" também é melhor).</p></div>`;
+  <div class="src-info">⚖️ Previsto × Realizado por categoria · Prev = CA lançado (📋) ou média móvel 3m (📊) · Real = efetivo (Excel + CA) · "—" = mês ainda não realizado</div>
+  <div class="panel"><div class="pt">DRE Previsto × Realizado — ${monthLabel(cols[0].m)} → ${monthLabel(cols[cols.length-1].m)} <span class="pt-badge">Competência</span>
+    <span style="float:right;font-weight:400">
+      <span style="font-size:10px;color:var(--muted);margin-right:8px">Clique nas contas ▶ para abrir</span>
+      <button class="dre-tb" style="font-size:10px;padding:2px 8px" onclick="cmpDrillAll(true)">▼ Expandir tudo</button>
+      <button class="dre-tb" style="font-size:10px;padding:2px 8px" onclick="cmpDrillAll(false)">▶ Recolher tudo</button>
+    </span></div>
+  <div class="tw" style="overflow-x:auto"><table style="width:100%;min-width:${180+nC*170}px">${head}${body}</table></div>
+  <p class="note">ℹ Δ% = (Realizado − Previsto) ÷ |Previsto|. Verde = realizado melhor que o previsto (linhas de custo estão em valores negativos, então "acima" também é melhor). Subcategorias de receita vêm do Excel (Real) e do Conta Azul (Prev).</p></div>`;
 }
 function renderDREbyCostCenter(d){
   if(!APP) return splashHTML();
@@ -1888,6 +1933,17 @@ function getAggData(){
 window.setFCMode=function(mode){FC_MODE=mode;renderFluxo();};
 window.setDreMode=function(mode){DRE_MODE=mode;renderDRE()};
 window.setDreRealPrev=function(mode){DRE_REALPREV=mode;renderDRE();};
+window.cmpDrill=function(pid){
+  const rows=document.querySelectorAll(".cmp-sub-"+pid);
+  const ico=document.getElementById("cico-"+pid);
+  const open=rows.length&&rows[0].style.display==="none";
+  rows.forEach(r=>r.style.display=open?"":"none");
+  if(ico)ico.textContent=open?"▼":"▶";
+};
+window.cmpDrillAll=function(open){
+  document.querySelectorAll(".cmp-sub").forEach(r=>r.style.display=open?"":"none");
+  document.querySelectorAll('[id^="cico-"]').forEach(i=>i.textContent=open?"▼":"▶");
+};
 window.dreToggleMes=function(m){
   const i=MESES_SEL.indexOf(m);
   if(i>=0)MESES_SEL.splice(i,1);
