@@ -1039,14 +1039,46 @@ function processData(){
     }
   }
 
-  // ── DRE PREVISTO: timeline Jan→Dez do ano corrente, meses futuros com previsão do CA ──
-  // Realizado (Excel) para meses passados; previsão (CA competência, todos os lançamentos) para futuros.
-  function buildMonthPrev(mes){
+  // ── DRE PREVISTO: timeline Jan→Dez do ano corrente ──────────────────────
+  // Realizado (Excel) para meses com receita real; meses futuros/sem receita:
+  // previsão do CA (competência) e, na ausência, média móvel dos últimos 3 meses.
+  const _prevYear=hoje.slice(0,4);
+  const _prevEnd=_prevYear+"-12";
+  let _prevStart=(mesesVisiveis[0]||allMeses[0]||_prevYear+"-01");
+  if(_prevStart<_prevYear+"-01")_prevStart=_prevYear+"-01"; // clampa ao ano corrente (Jan→Dez)
+  const drePrevMeses=[];{let _py=+_prevStart.slice(0,4),_pm=+_prevStart.slice(5,7);while(true){const _ms=_py+"-"+String(_pm).padStart(2,"0");if(_ms>_prevEnd)break;drePrevMeses.push(_ms);_pm++;if(_pm>12){_pm=1;_py++;}}}
+
+  // Meses REALIZADOS para efeito da DRE anual = os que têm receita Excel real (>0)
+  const _realMeses=drePrevMeses.filter(m=>byMes[m]&&(byMes[m].rb_excel||0)>0);
+  // Base de média móvel: últimos 3 meses realizados
+  const _base=_realMeses.slice(-3).map(m=>byMes[m]);
+  const _avg=k=>_base.length?_base.reduce((a,d)=>a+(d[k]||0),0)/_base.length:0;
+  const _media=_base.length?{
+    rb:_avg("rb_excel"),rl:_avg("rl"),rep:_avg("rep"),
+    desp_comercial:_avg("desp_comercial"),desp_admin:_avg("desp_admin"),
+    desp_financeiro:_avg("desp_financeiro"),rendimentos:_avg("rendimentos"),
+    ratio:_avg("rb_excel")>0?_avg("rl")/_avg("rb_excel"):1
+  }:null;
+
+  function buildMonthPrev(mes,media){
     const crM=cr.filter(r=>r.mes===mes),cpM=cp.filter(r=>r.mes===mes);
-    const rb=crM.reduce((a,r)=>a+r.faturado,0); // receita prevista = contas a receber por competência
-    const rl=rb;                                 // CA não tem coluna de descontos separada
     const sumG=g=>cpM.filter(r=>r.grupo===g).reduce((a,r)=>a+r.original,0);
-    const rep=sumG("repasse"),desp_comercial=sumG("comercial"),desp_admin=sumG("administrativo"),desp_financeiro=sumG("financeiro"),rendimentos=sumG("rendimento");
+    // Valores do CA por competência (podem ser 0 se não há lançamento futuro)
+    let rb=crM.reduce((a,r)=>a+r.faturado,0);
+    let rep=sumG("repasse"),desp_comercial=sumG("comercial"),desp_admin=sumG("administrativo"),desp_financeiro=sumG("financeiro"),rendimentos=sumG("rendimento");
+    let fonteRb="ca";
+    // Fallback: média móvel quando o CA não tem lançamento para a linha
+    if(media){
+      if(rb<=0){rb=media.rb;fonteRb="media";}
+      if(rep<=0)rep=media.rep;
+      if(desp_comercial<=0)desp_comercial=media.desp_comercial;
+      if(desp_admin<=0)desp_admin=media.desp_admin;
+      if(desp_financeiro<=0)desp_financeiro=media.desp_financeiro;
+      if(rendimentos<=0)rendimentos=media.rendimentos;
+    }
+    // Receita líquida: se veio do CA usa o próprio total; se veio da média aplica o desconto médio
+    const rl=(fonteRb==="media"&&media)?rb*media.ratio:rb;
+    // Impostos: valor real do CA se lançado, senão provisão sobre rl
     const cn=s=>(s||"").toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
     const paid=nm=>cpM.filter(r=>cn(r.cat)===nm).reduce((a,r)=>a+r.original,0);
     const pisP=paid("pis"),cofP=paid("cofins"),issP=paid("iss"),csllP=paid("csll"),irpjP=paid("irpj"),adicP=paid("irpj adicional");
@@ -1056,31 +1088,32 @@ function processData(){
       csll:csllP>0?csllP:im.csll,irpj:irpjP>0?irpjP:im.irpj,adicional:adicP>0?adicP:im.adicional,
       csllFromCA:csllP>0,irpjFromCA:irpjP>0,adicFromCA:adicP>0};
     impostos.total=impostos.pis+impostos.cofins+impostos.iss+impostos.csll+impostos.irpj+impostos.adicional;
+    // Categorias de receita (drill-down): CR se houver, senão linha única de projeção
     const catMap={};crM.forEach(r=>{if(!catMap[r.cat])catMap[r.cat]={n:r.cat,faturado:0,recebido:0,aberto:0};catMap[r.cat].faturado+=r.faturado;catMap[r.cat].recebido+=r.recebido;catMap[r.cat].aberto+=r.aberto});
-    const categorias=Object.values(catMap).sort((a,b)=>b.faturado-a.faturado);
+    let categorias=Object.values(catMap).sort((a,b)=>b.faturado-a.faturado);
+    if(fonteRb==="media")categorias=[{n:"Projeção (média 3m)",faturado:rb,recebido:rl,aberto:0}];
+    // Categorias de despesa (drill-down): CP se houver, senão linhas de projeção por grupo
     const cpCatMap={};cpM.forEach(r=>{const k=r.cat+"|"+r.grupo;if(!cpCatMap[k])cpCatMap[k]={n:r.cat,grupo:r.grupo,valor:0};cpCatMap[k].valor+=r.original});
+    const addProj=(grupo,val)=>{if(val>0&&!Object.values(cpCatMap).some(c=>c.grupo===grupo))cpCatMap["proj_"+grupo]={n:"Projeção (média 3m)",grupo,valor:val};};
+    addProj("repasse",rep);addProj("comercial",desp_comercial);addProj("administrativo",desp_admin);addProj("financeiro",desp_financeiro);addProj("rendimento",rendimentos);
     const cpCategorias=Object.values(cpCatMap).sort((a,b)=>b.valor-a.valor);
     const ded=impostos.pis+impostos.cofins+impostos.iss;
     const rl_liq=rl-ded,margem_bruta=rl_liq-rep,ebitda=margem_bruta-desp_comercial-desp_admin;
     const rf=rendimentos-desp_financeiro,ebt=ebitda+rf,csll_irpj=impostos.csll+impostos.irpj+impostos.adicional,ll=ebt-csll_irpj;
-    return{mes,rl,rb_excel:rb,desc_excel:0,recebido:0,abertoCR:0,rep,desp_comercial,desp_admin,desp_financeiro,rendimentos,emprestimo:0,rf,ebt,margem_bruta,ebitda,impostos,ll,at:crM.length,pac:0,categorias,categoriasCA:categorias,cpCategorias,profissionais:[],disciplinas:[],familias:[],_previsto:true};
+    return{mes,rl,rb_excel:rb,desc_excel:0,recebido:0,abertoCR:0,rep,desp_comercial,desp_admin,desp_financeiro,rendimentos,emprestimo:0,rf,ebt,margem_bruta,ebitda,impostos,ll,at:crM.length,pac:0,categorias,categoriasCA:categorias,cpCategorias,profissionais:[],disciplinas:[],familias:[],_previsto:true,_fonteRb:fonteRb};
   }
-  const _prevYear=hoje.slice(0,4);
-  const _prevEnd=_prevYear+"-12";
-  let _prevStart=(mesesVisiveis[0]||allMeses[0]||_prevYear+"-01");
-  if(_prevStart<_prevYear+"-01")_prevStart=_prevYear+"-01"; // clampa ao ano corrente (Jan→Dez)
-  const drePrevMeses=[];{let _py=+_prevStart.slice(0,4),_pm=+_prevStart.slice(5,7);while(true){const _ms=_py+"-"+String(_pm).padStart(2,"0");if(_ms>_prevEnd)break;drePrevMeses.push(_ms);_pm++;if(_pm>12){_pm=1;_py++;}}}
-  const byMesPrev={};const drePrevSet=new Set();
+
+  const byMesPrev={};const drePrevSet=new Set();const drePrevFonte={};
   drePrevMeses.forEach(m=>{
-    if(m<=hoje&&mesesVisiveis.includes(m)&&byMes[m]){byMesPrev[m]=byMes[m];}      // realizado (Excel)
-    else{byMesPrev[m]=buildMonthPrev(m);drePrevSet.add(m);}                        // previsão (CA)
+    if(byMes[m]&&(byMes[m].rb_excel||0)>0){byMesPrev[m]=byMes[m];}       // realizado (receita Excel real)
+    else{const d=buildMonthPrev(m,_media);byMesPrev[m]=d;drePrevSet.add(m);drePrevFonte[m]=d._fonteRb;} // previsão
   });
 
   // Meses visíveis: apenas meses com dados Excel (atRows)
   // Isso garante que o TOTAL = exatamente a soma dos meses no seletor
   MESES=mesesVisiveis;
   if(CUR_MES!=="TOTAL"&&!MESES.includes(CUR_MES))CUR_MES="TOTAL";
-  APP={byMes,allMeses,mesesVisiveis,fcData,fcDataPrevisto,atRows,crRows:cr,cpRows:cp,byMesPrev,drePrevMeses,drePrevSet};
+  APP={byMes,allMeses,mesesVisiveis,fcData,fcDataPrevisto,atRows,crRows:cr,cpRows:cp,byMesPrev,drePrevMeses,drePrevSet,drePrevFonte};
   buildMesBar();updateHeaderKPIs();updateSyncBadge(true);render();
 }
 
@@ -1191,7 +1224,7 @@ function renderDRE(){
 
   // Modo Previsto: DRE anual (Jan→Dez), meses futuros com previsão do CA
   if(DRE_REALPREV==="previsto"){
-    el.innerHTML=toggleBar+renderDREMulti(APP.drePrevMeses||[], hasExcel, {srcMap:APP.byMesPrev, prevSet:APP.drePrevSet, previsto:true});
+    el.innerHTML=toggleBar+renderDREMulti(APP.drePrevMeses||[], hasExcel, {srcMap:APP.byMesPrev, prevSet:APP.drePrevSet, fonte:APP.drePrevFonte, previsto:true});
     return;
   }
 
@@ -1340,6 +1373,7 @@ function renderDREMulti(meses, hasExcel, opts){
   opts=opts||{};
   const src=opts.srcMap||APP.byMes;
   const prevSet=opts.prevSet||new Set();
+  const fonteMap=opts.fonte||{};
   const isPrevView=!!opts.previsto;
   // Prepara dados de cada mês
   const cols=meses.map(m=>{
@@ -1379,7 +1413,8 @@ function renderDREMulti(meses, hasExcel, opts){
   let thead=`<thead><tr><th style="min-width:180px">Linha</th>`;
   cols.forEach((c,i)=>{
     const isP=prevSet.has(c.m);
-    thead+=`<th class="r" style="width:${colW}px${isP?";color:var(--brand)":""}">${monthLabel(c.m)}${isP?'<br><span style="font-size:8px;font-weight:400;opacity:.85">📋 prev</span>':""}</th>`;
+    const _bl=fonteMap[c.m]==="media"?"📊 média":fonteMap[c.m]==="ca"?"📋 CA":"📋 prev";
+    thead+=`<th class="r" style="width:${colW}px${isP?";color:var(--brand)":""}">${monthLabel(c.m)}${isP?`<br><span style="font-size:8px;font-weight:400;opacity:.85">${_bl}</span>`:""}</th>`;
     thead+=`<th class="r" style="width:38px;font-size:9px;color:var(--muted)">AV%</th>`;
     if(i>0)thead+=`<th class="r" style="width:50px;font-size:9px;color:var(--muted)">Var%</th>`;
   });
@@ -1432,7 +1467,7 @@ function renderDREMulti(meses, hasExcel, opts){
   const getCpCat=(c,n)=>c.cpCats.find(x=>x.n===n)?.valor||0;
 
   const _srcInfo=isPrevView
-    ? `📋 DRE Anual — meses futuros em previsão (Conta Azul, competência). Realizado: Excel + CA · 📋 = previsto`
+    ? `📋 DRE Anual — Realizado (Excel+CA) · 📋 CA = lançado no Conta Azul · 📊 média = média móvel dos últimos 3 meses`
     : `📊 Selecione até 6 meses para comparar · Receita: Excel · Despesas: Conta Azul (competência)`;
   const _titulo=isPrevView
     ? `DRE Anual — Realizado + Previsto (${monthLabel(cols[0].m)} → ${monthLabel(cols[cols.length-1].m)})`
