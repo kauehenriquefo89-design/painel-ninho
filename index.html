@@ -1039,11 +1039,48 @@ function processData(){
     }
   }
 
+  // ── DRE PREVISTO: timeline Jan→Dez do ano corrente, meses futuros com previsão do CA ──
+  // Realizado (Excel) para meses passados; previsão (CA competência, todos os lançamentos) para futuros.
+  function buildMonthPrev(mes){
+    const crM=cr.filter(r=>r.mes===mes),cpM=cp.filter(r=>r.mes===mes);
+    const rb=crM.reduce((a,r)=>a+r.faturado,0); // receita prevista = contas a receber por competência
+    const rl=rb;                                 // CA não tem coluna de descontos separada
+    const sumG=g=>cpM.filter(r=>r.grupo===g).reduce((a,r)=>a+r.original,0);
+    const rep=sumG("repasse"),desp_comercial=sumG("comercial"),desp_admin=sumG("administrativo"),desp_financeiro=sumG("financeiro"),rendimentos=sumG("rendimento");
+    const cn=s=>(s||"").toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+    const paid=nm=>cpM.filter(r=>cn(r.cat)===nm).reduce((a,r)=>a+r.original,0);
+    const pisP=paid("pis"),cofP=paid("cofins"),issP=paid("iss"),csllP=paid("csll"),irpjP=paid("irpj"),adicP=paid("irpj adicional");
+    const im=calcImpostos(rl);
+    const impostos={...im,
+      pis:pisP>0?pisP:im.pis,cofins:cofP>0?cofP:im.cofins,iss:issP>0?issP:im.iss,
+      csll:csllP>0?csllP:im.csll,irpj:irpjP>0?irpjP:im.irpj,adicional:adicP>0?adicP:im.adicional,
+      csllFromCA:csllP>0,irpjFromCA:irpjP>0,adicFromCA:adicP>0};
+    impostos.total=impostos.pis+impostos.cofins+impostos.iss+impostos.csll+impostos.irpj+impostos.adicional;
+    const catMap={};crM.forEach(r=>{if(!catMap[r.cat])catMap[r.cat]={n:r.cat,faturado:0,recebido:0,aberto:0};catMap[r.cat].faturado+=r.faturado;catMap[r.cat].recebido+=r.recebido;catMap[r.cat].aberto+=r.aberto});
+    const categorias=Object.values(catMap).sort((a,b)=>b.faturado-a.faturado);
+    const cpCatMap={};cpM.forEach(r=>{const k=r.cat+"|"+r.grupo;if(!cpCatMap[k])cpCatMap[k]={n:r.cat,grupo:r.grupo,valor:0};cpCatMap[k].valor+=r.original});
+    const cpCategorias=Object.values(cpCatMap).sort((a,b)=>b.valor-a.valor);
+    const ded=impostos.pis+impostos.cofins+impostos.iss;
+    const rl_liq=rl-ded,margem_bruta=rl_liq-rep,ebitda=margem_bruta-desp_comercial-desp_admin;
+    const rf=rendimentos-desp_financeiro,ebt=ebitda+rf,csll_irpj=impostos.csll+impostos.irpj+impostos.adicional,ll=ebt-csll_irpj;
+    return{mes,rl,rb_excel:rb,desc_excel:0,recebido:0,abertoCR:0,rep,desp_comercial,desp_admin,desp_financeiro,rendimentos,emprestimo:0,rf,ebt,margem_bruta,ebitda,impostos,ll,at:crM.length,pac:0,categorias,categoriasCA:categorias,cpCategorias,profissionais:[],disciplinas:[],familias:[],_previsto:true};
+  }
+  const _prevYear=hoje.slice(0,4);
+  const _prevEnd=_prevYear+"-12";
+  let _prevStart=(mesesVisiveis[0]||allMeses[0]||_prevYear+"-01");
+  if(_prevStart<_prevYear+"-01")_prevStart=_prevYear+"-01"; // clampa ao ano corrente (Jan→Dez)
+  const drePrevMeses=[];{let _py=+_prevStart.slice(0,4),_pm=+_prevStart.slice(5,7);while(true){const _ms=_py+"-"+String(_pm).padStart(2,"0");if(_ms>_prevEnd)break;drePrevMeses.push(_ms);_pm++;if(_pm>12){_pm=1;_py++;}}}
+  const byMesPrev={};const drePrevSet=new Set();
+  drePrevMeses.forEach(m=>{
+    if(m<=hoje&&mesesVisiveis.includes(m)&&byMes[m]){byMesPrev[m]=byMes[m];}      // realizado (Excel)
+    else{byMesPrev[m]=buildMonthPrev(m);drePrevSet.add(m);}                        // previsão (CA)
+  });
+
   // Meses visíveis: apenas meses com dados Excel (atRows)
   // Isso garante que o TOTAL = exatamente a soma dos meses no seletor
   MESES=mesesVisiveis;
   if(CUR_MES!=="TOTAL"&&!MESES.includes(CUR_MES))CUR_MES="TOTAL";
-  APP={byMes,allMeses,mesesVisiveis,fcData,fcDataPrevisto,atRows,crRows:cr,cpRows:cp};
+  APP={byMes,allMeses,mesesVisiveis,fcData,fcDataPrevisto,atRows,crRows:cr,cpRows:cp,byMesPrev,drePrevMeses,drePrevSet};
   buildMesBar();updateHeaderKPIs();updateSyncBadge(true);render();
 }
 
@@ -1074,6 +1111,7 @@ const splashHTML=()=>`<div class="splash"><img class="splash-logo" src="data:ima
 
 // ── DRE RENDERER ──────────────────────────────────────────────────────────
 let DRE_MODE = "normal";
+let DRE_REALPREV = "real"; // "real" | "previsto"
 let FC_MODE = "realizado"; // "realizado" | "previsto" | "ambos"
 // Sort state per table: {tableId: {col, dir}}
 const SORT_STATE={};
@@ -1136,15 +1174,26 @@ function renderDRE(){
   if(!APP){el.innerHTML=splashHTML();return;}
   const d=getActiveData();if(!d){el.innerHTML=splashHTML();return;}
 
+  const rpToggle = DRE_MODE==="normal" ? `<span style="margin-left:14px;padding-left:14px;border-left:1px solid var(--border);display:inline-flex;gap:6px;align-items:center">
+      <button class="dre-tb${DRE_REALPREV==="real"?" a":""}" onclick="setDreRealPrev('real')">✅ Realizado</button>
+      <button class="dre-tb${DRE_REALPREV==="previsto"?" a":""}" onclick="setDreRealPrev('previsto')">📋 Previsto (até Dez)</button>
+    </span>` : "";
   const toggleBar=`<div class="dre-toggle">
     <button class="dre-tb${DRE_MODE==="normal"?" a":""}" onclick="setDreMode('normal')">📊 DRE</button>
     <button class="dre-tb${DRE_MODE==="cc"?" a":""}" onclick="setDreMode('cc')">🏢 Centro de Custo</button>
+    ${rpToggle}
     <button class="dre-tb" onclick="exportDRE()" style="margin-left:auto;background:#22c55e;color:#fff;border-color:transparent;font-size:11px">⬇ Excel</button>
   </div>`;
 
   if(DRE_MODE==="cc"){el.innerHTML=toggleBar+renderDREbyCostCenter(d);return;}
 
   const hasExcel=!!XL_DATA;
+
+  // Modo Previsto: DRE anual (Jan→Dez), meses futuros com previsão do CA
+  if(DRE_REALPREV==="previsto"){
+    el.innerHTML=toggleBar+renderDREMulti(APP.drePrevMeses||[], hasExcel, {srcMap:APP.byMesPrev, prevSet:APP.drePrevSet, previsto:true});
+    return;
+  }
 
   // ── Determina meses para comparativo ────────────────────────────────────
   // Usa MESES_SEL (seletor superior) ou mês ativo
@@ -1287,10 +1336,14 @@ function renderDRESingle(d, mes, hasExcel){
 }
 
 // ── DRE Multi-colunas (comparativo) ───────────────────────────────────────
-function renderDREMulti(meses, hasExcel){
+function renderDREMulti(meses, hasExcel, opts){
+  opts=opts||{};
+  const src=opts.srcMap||APP.byMes;
+  const prevSet=opts.prevSet||new Set();
+  const isPrevView=!!opts.previsto;
   // Prepara dados de cada mês
   const cols=meses.map(m=>{
-    const md=APP.byMes[m];if(!md)return null;
+    const md=src[m];if(!md)return null;
     const rb=md.rb_excel||md.rl;
     const desc=md.desc_excel||0;
     const rl=md.rl;
@@ -1325,7 +1378,8 @@ function renderDREMulti(meses, hasExcel){
   const colW=Math.floor(520/nCols);
   let thead=`<thead><tr><th style="min-width:180px">Linha</th>`;
   cols.forEach((c,i)=>{
-    thead+=`<th class="r" style="width:${colW}px">${monthLabel(c.m)}</th>`;
+    const isP=prevSet.has(c.m);
+    thead+=`<th class="r" style="width:${colW}px${isP?";color:var(--brand)":""}">${monthLabel(c.m)}${isP?'<br><span style="font-size:8px;font-weight:400;opacity:.85">📋 prev</span>':""}</th>`;
     thead+=`<th class="r" style="width:38px;font-size:9px;color:var(--muted)">AV%</th>`;
     if(i>0)thead+=`<th class="r" style="width:50px;font-size:9px;color:var(--muted)">Var%</th>`;
   });
@@ -1377,9 +1431,15 @@ function renderDREMulti(meses, hasExcel){
   const getCat=(c,cats,n)=>(cats?cats.find(x=>x.n===n)?.faturado:0)||0;
   const getCpCat=(c,n)=>c.cpCats.find(x=>x.n===n)?.valor||0;
 
+  const _srcInfo=isPrevView
+    ? `📋 DRE Anual — meses futuros em previsão (Conta Azul, competência). Realizado: Excel + CA · 📋 = previsto`
+    : `📊 Selecione até 6 meses para comparar · Receita: Excel · Despesas: Conta Azul (competência)`;
+  const _titulo=isPrevView
+    ? `DRE Anual — Realizado + Previsto (${monthLabel(cols[0].m)} → ${monthLabel(cols[cols.length-1].m)})`
+    : `DRE Comparativa — ${cols.map(c=>monthLabel(c.m)).join(" × ")}`;
   return`
-  <div class="src-info">📊 Selecione até 6 meses para comparar · Receita: Excel · Despesas: Conta Azul (competência)</div>
-  <div class="panel"><div class="pt">DRE Comparativa — ${cols.map(c=>monthLabel(c.m)).join(" × ")} <span class="pt-badge">Competência</span></div>
+  <div class="src-info">${_srcInfo}</div>
+  <div class="panel"><div class="pt">${_titulo} <span class="pt-badge">Competência</span></div>
   <div class="tw" style="overflow-x:auto"><table style="width:100%;min-width:${180+nCols*(colW+90)}px">
   ${thead}<tbody>
   ${row("01 RECEITA BRUTA",c=>c.rb,"var(--blue)",true)}
@@ -1718,6 +1778,7 @@ function getAggData(){
 
 window.setFCMode=function(mode){FC_MODE=mode;renderFluxo();};
 window.setDreMode=function(mode){DRE_MODE=mode;renderDRE()};
+window.setDreRealPrev=function(mode){DRE_REALPREV=mode;renderDRE();};
 window.dreToggleMes=function(m){
   const i=MESES_SEL.indexOf(m);
   if(i>=0)MESES_SEL.splice(i,1);
