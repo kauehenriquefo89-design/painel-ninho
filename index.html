@@ -1108,12 +1108,14 @@ function processData(){
     if(byMes[m]&&(byMes[m].rb_excel||0)>0){byMesPrev[m]=byMes[m];}       // realizado (receita Excel real)
     else{const d=buildMonthPrev(m,_media);byMesPrev[m]=d;drePrevSet.add(m);drePrevFonte[m]=d._fonteRb;} // previsão
   });
+  // Previsão pura (todos os meses) — base do comparativo Previsto × Realizado
+  const byMesFore={};drePrevMeses.forEach(m=>{byMesFore[m]=buildMonthPrev(m,_media);});
 
   // Meses visíveis: apenas meses com dados Excel (atRows)
   // Isso garante que o TOTAL = exatamente a soma dos meses no seletor
   MESES=mesesVisiveis;
   if(CUR_MES!=="TOTAL"&&!MESES.includes(CUR_MES))CUR_MES="TOTAL";
-  APP={byMes,allMeses,mesesVisiveis,fcData,fcDataPrevisto,atRows,crRows:cr,cpRows:cp,byMesPrev,drePrevMeses,drePrevSet,drePrevFonte};
+  APP={byMes,allMeses,mesesVisiveis,fcData,fcDataPrevisto,atRows,crRows:cr,cpRows:cp,byMesPrev,drePrevMeses,drePrevSet,drePrevFonte,byMesFore};
   buildMesBar();updateHeaderKPIs();updateSyncBadge(true);render();
 }
 
@@ -1210,6 +1212,7 @@ function renderDRE(){
   const rpToggle = DRE_MODE==="normal" ? `<span style="margin-left:14px;padding-left:14px;border-left:1px solid var(--border);display:inline-flex;gap:6px;align-items:center">
       <button class="dre-tb${DRE_REALPREV==="real"?" a":""}" onclick="setDreRealPrev('real')">✅ Realizado</button>
       <button class="dre-tb${DRE_REALPREV==="previsto"?" a":""}" onclick="setDreRealPrev('previsto')">📋 Previsto (até Dez)</button>
+      <button class="dre-tb${DRE_REALPREV==="ambos"?" a":""}" onclick="setDreRealPrev('ambos')">⚖️ Prev × Real</button>
     </span>` : "";
   const toggleBar=`<div class="dre-toggle">
     <button class="dre-tb${DRE_MODE==="normal"?" a":""}" onclick="setDreMode('normal')">📊 DRE</button>
@@ -1225,6 +1228,10 @@ function renderDRE(){
   // Modo Previsto: DRE anual (Jan→Dez), meses futuros com previsão do CA
   if(DRE_REALPREV==="previsto"){
     el.innerHTML=toggleBar+renderDREMulti(APP.drePrevMeses||[], hasExcel, {srcMap:APP.byMesPrev, prevSet:APP.drePrevSet, fonte:APP.drePrevFonte, previsto:true});
+    return;
+  }
+  if(DRE_REALPREV==="ambos"){
+    el.innerHTML=toggleBar+renderDRECompare(APP.drePrevMeses||[]);
     return;
   }
 
@@ -1510,6 +1517,73 @@ function renderDREMulti(meses, hasExcel, opts){
 }
 
 
+function renderDRECompare(meses){
+  const fore=APP.byMesFore||{}, real=APP.byMes||{}, foreFonte=APP.drePrevFonte||{};
+  function deriveDRE(md){
+    const rb=md.rb_excel||md.rl||0, desc=md.desc_excel||0, rl=md.rl||0;
+    const imp=md.impostos||calcImpostos(rl);
+    const ded=(imp.pis||0)+(imp.cofins||0)+(imp.iss||0);
+    const rl_liq=rl-ded, rep=md.rep||0, mb=rl_liq-rep;
+    const dc=md.desp_comercial||0, da=md.desp_admin||0, ebitda=mb-dc-da;
+    const rf=(md.rendimentos||0)-(md.desp_financeiro||0), ebt=ebitda+rf;
+    const csll_irpj=(imp.csll||0)+(imp.irpj||0)+(imp.adicional||0), ll=ebt-csll_irpj;
+    return{rb,desc,ded,rl_liq,rep,mb,dc,da,ebitda,rf,ebt,csll_irpj,ll};
+  }
+  const cols=meses.map(m=>{
+    const fd=fore[m]; if(!fd)return null;
+    const rmd=(real[m]&&(real[m].rb_excel||0)>0)?real[m]:null; // realizado só com receita Excel real
+    return{m,f:deriveDRE(fd),r:rmd?deriveDRE(rmd):null,isReal:!!rmd,fonte:foreFonte[m]};
+  }).filter(Boolean);
+  if(!cols.length)return`<div class="no-data">Sem dados para o comparativo</div>`;
+  const nC=cols.length;
+  const rows=[
+    {l:"01 RECEITA BRUTA",f:d=>d.rb,color:"var(--blue)",bold:1},
+    {l:"02 DEDUÇÕES",f:d=>-(d.desc+d.ded),color:"var(--red)"},
+    {l:"= RECEITA LÍQUIDA",f:d=>d.rl_liq,color:"var(--brand)",bold:1,sep:1},
+    {l:"03 REPASSES",f:d=>-d.rep,color:"var(--red)"},
+    {l:"= MARGEM BRUTA",f:d=>d.mb,bold:1,sep:1},
+    {l:"04.1 DESPESAS COMERCIAIS",f:d=>-d.dc,color:"var(--red)"},
+    {l:"04.2 DESPESAS ADMINISTRATIVAS",f:d=>-d.da,color:"var(--red)"},
+    {l:"= EBITDA",f:d=>d.ebitda,bold:1,sep:1},
+    {l:"05 RESULTADO FINANCEIRO",f:d=>d.rf,color:"var(--muted)"},
+    {l:"= EBT (ANTES DOS IMPOSTOS)",f:d=>d.ebt,bold:1},
+    {l:"(–) CSLL/IRPJ",f:d=>-d.csll_irpj,color:"var(--muted)",sep:1},
+    {l:"= LUCRO LÍQUIDO",f:d=>d.ll,bold:1},
+  ];
+  const bl="2px solid var(--border)";
+  // Cabeçalho em 2 níveis
+  let head=`<thead><tr><th rowspan="2" style="min-width:170px;text-align:left;vertical-align:bottom">Linha</th>`;
+  cols.forEach(c=>{
+    const badge=c.isReal?"":(c.fonte==="media"?' <span style="font-size:8px;color:var(--brand)">📊</span>':' <span style="font-size:8px;color:var(--brand)">📋</span>');
+    head+=`<th colspan="3" class="r" style="border-left:${bl};${c.isReal?"":"opacity:.9"}">${monthLabel(c.m)}${badge}</th>`;
+  });
+  head+=`</tr><tr>`;
+  cols.forEach(()=>{head+=`<th class="r" style="font-size:9px;color:var(--brand);border-left:${bl};font-weight:600">Prev</th><th class="r" style="font-size:9px;color:var(--text);font-weight:600">Real</th><th class="r" style="font-size:9px;color:var(--muted)">Δ%</th>`;});
+  head+=`</tr></thead>`;
+  const fmtD=(rv,pv)=>{
+    if(rv==null||pv==null||pv===0)return`<span style="color:var(--subtle);font-size:9px">—</span>`;
+    const d=(rv-pv)/Math.abs(pv), g=(rv-pv)>=0;
+    return`<span style="color:${g?"var(--green)":"var(--red)"};font-size:9px">${g?"▲":"▼"}${Math.abs(d*100).toFixed(0)}%</span>`;
+  };
+  let body="<tbody>";
+  rows.forEach(row=>{
+    body+=`<tr><td style="font-weight:${row.bold?700:400};color:${row.color||"var(--text)"};padding-left:8px;font-size:${row.bold?12:11}px">${row.l}</td>`;
+    cols.forEach(c=>{
+      const pv=row.f(c.f), rv=c.r?row.f(c.r):null;
+      body+=`<td class="r mn" style="border-left:${bl};color:var(--brand);font-size:10px">${fR(pv)}</td>`;
+      body+=`<td class="r mn" style="font-size:10px;color:${row.color||"var(--text)"};font-weight:${row.bold?600:400}">${rv==null?'<span style="color:var(--subtle)">—</span>':fR(rv)}</td>`;
+      body+=`<td class="r">${fmtD(rv,pv)}</td>`;
+    });
+    body+=`</tr>`;
+    if(row.sep)body+=`<tr class="dsp"><td colspan="${1+nC*3}"></td></tr>`;
+  });
+  body+="</tbody>";
+  return`
+  <div class="src-info">⚖️ Previsto × Realizado · Prev = CA lançado (📋) ou média móvel 3m (📊) · Real = efetivo (Excel + CA) · "—" = mês ainda não realizado</div>
+  <div class="panel"><div class="pt">DRE Previsto × Realizado — ${monthLabel(cols[0].m)} → ${monthLabel(cols[cols.length-1].m)} <span class="pt-badge">Competência</span></div>
+  <div class="tw" style="overflow-x:auto"><table style="width:100%;min-width:${170+nC*170}px">${head}${body}</table></div>
+  <p class="note">ℹ Δ% = (Realizado − Previsto) ÷ |Previsto|. Verde = realizado melhor que o previsto (linhas de custo estão em valores negativos, então "acima" também é melhor).</p></div>`;
+}
 function renderDREbyCostCenter(d){
   if(!APP) return splashHTML();
   const hasExcel=!!XL_DATA, hasCA=!!CA_DATA;
