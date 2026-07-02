@@ -1227,12 +1227,12 @@ function applyUnit(){
 }
 // Consolidado: impostos = soma dos impostos de cada unidade (cada CNPJ calculado na própria base)
 function applyConsolidatedTaxes(){
-  const merged=APP, sx=XL_DATA, sc=CA_DATA;
+  const merged=APP, sx=XL_DATA, sc=CA_DATA, sMeses=MESES;
   XL_DATA=(LAPA_XL&&LAPA_XL.at&&LAPA_XL.at.length)?LAPA_XL:null; CA_DATA=LAPA_CA;
   const lapa=(XL_DATA||CA_DATA)?processData(true):{byMes:{}};
   const _v=vmData(); XL_DATA=_v.xl; CA_DATA=_v.ca;
   const vmU=processData(true)||{byMes:{}};
-  XL_DATA=sx; CA_DATA=sc; APP=merged; // restaura o modelo mesclado
+  XL_DATA=sx; CA_DATA=sc; APP=merged; MESES=sMeses; // restaura o modelo mesclado e o MESES global
   const Z={pis:0,cofins:0,iss:0,csll:0,irpj:0,adicional:0};
   Object.keys(merged.byMes).forEach(m=>{
     const d=merged.byMes[m];
