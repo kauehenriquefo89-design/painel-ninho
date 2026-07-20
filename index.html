@@ -2333,6 +2333,51 @@ function buildDiario(mes,src){
   }
   return{dias,abertura,fonte:src.fonte,ndias};
 }
+// Fonte HÍBRIDA (Projetado): extrato → CA quitado (preenche lacuna até hoje) → CA em aberto (futuro)
+function fcDiarioFonteProj(){
+  const hoje=new Date().toISOString().slice(0,10);
+  const nomeCli=it=>(it.cliente&&(it.cliente.nome||it.cliente.razao_social))||it.descricao||"Recebimento";
+  const cat=it=>(it.categorias&&it.categorias[0]&&it.categorias[0].nome)||"";
+  const dv=it=>(it.data_vencimento||it.data_competencia||"").slice(0,10);
+  const rows=extratoRows().map(r=>({d:r.d,v:r.v,ds:r.ds,c:r.c,u:r.u,k:"R",f:"banco"}));
+  const ultimoEx=rows.length?rows.map(r=>r.d).sort().slice(-1)[0]:"";
+  // Camada 2: lançamentos já quitados no CA depois do extrato e até hoje (cobre os dias que o extrato ainda não trouxe)
+  if(CA_DATA){
+    (CA_DATA.cr||[]).forEach(it=>{const p=toNum(it.pago||0);if(p<=0||isTransfer(it))return;const d=dv(it);
+      if(!d||d<=ultimoEx||d>hoje)return; rows.push({d,v:p,ds:nomeCli(it),c:cat(it),k:"R",f:"ca"});});
+    (CA_DATA.cp||[]).forEach(it=>{const p=toNum(it.pago||0);if(p<=0||isTransfer(it))return;const d=dv(it);
+      if(!d||d<=ultimoEx||d>hoje)return; rows.push({d,v:-p,ds:it.descricao||"Pagamento",c:cat(it),k:"R",f:"ca"});});
+  }
+  let corte=rows.length?rows.map(r=>r.d).sort().slice(-1)[0]:hoje;
+  if(corte>hoje)corte=hoje;
+  // Camada 3: em aberto (total − pago) com vencimento depois do corte = previsão
+  if(CA_DATA){
+    (CA_DATA.cr||[]).forEach(it=>{if(isTransfer(it))return;const ab=toNum(it.total||0)-toNum(it.pago||0);if(ab<=0)return;
+      const d=dv(it); if(!d||d<=corte)return; rows.push({d,v:ab,ds:nomeCli(it),c:cat(it),k:"P",f:"ca"});});
+    (CA_DATA.cp||[]).forEach(it=>{if(isTransfer(it))return;const ab=toNum(it.total||0)-toNum(it.pago||0);if(ab<=0)return;
+      const d=dv(it); if(!d||d<=corte)return; rows.push({d,v:-ab,ds:it.descricao||"A pagar",c:cat(it),k:"P",f:"ca"});});
+  }
+  const temPrev=rows.some(r=>r.k==="P");
+  return{rows,corte,fonte:"hibrido",temExtrato:!!ultimoEx,ultimoEx,temPrev};
+}
+// Série diária para um intervalo qualquer (usado no horizonte de 30 dias)
+function buildRangeDias(ini,fim,src){
+  let ab=saldoInicialUnidade();
+  src.rows.forEach(r=>{if(r.d<ini)ab+=r.v;});
+  const porDia={};
+  src.rows.forEach(r=>{if(r.d>=ini&&r.d<=fim)(porDia[r.d]=porDia[r.d]||[]).push(r);});
+  const dias=[];let ac=ab;
+  const cur=new Date(ini+"T12:00:00"),end=new Date(fim+"T12:00:00");
+  while(cur<=end){
+    const ds=cur.toISOString().slice(0,10),its=porDia[ds]||[];
+    const e=its.filter(x=>x.v>0).reduce((a,x)=>a+x.v,0);
+    const s=its.filter(x=>x.v<0).reduce((a,x)=>a-x.v,0);
+    ac+=e-s;
+    dias.push({d:ds,dia:cur.getDate(),e,s,sm:e-s,ac,itens:its,dow:cur.getDay()});
+    cur.setDate(cur.getDate()+1);
+  }
+  return{dias,abertura:ab};
+}
 function renderFluxoDiario(){
   const hojeStr=new Date().toISOString().slice(0,10);
   // Mês: usa o selecionado; senão o último com movimento; senão o mês atual
@@ -2340,7 +2385,9 @@ function renderFluxoDiario(){
   const universo=[...real.rows,...prev.rows].map(r=>r.d.slice(0,7)).filter(Boolean).sort();
   let mes=(CUR_MES&&CUR_MES!=="TOTAL")?CUR_MES:(universo.length?universo[universo.length-1]:hojeStr.slice(0,7));
   if(FC_DIA_MES)mes=FC_DIA_MES;
+  const proj=(FC_MODE==="projetado")?fcDiarioFonteProj():null;
   const dR=buildDiario(mes,real), dP=buildDiario(mes,prev);
+  const dJ=proj?buildDiario(mes,proj):null;
   const modo=FC_MODE;
   const nav=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
     <button class="dre-tb" onclick="fcDiaNav(-1)">‹ Mês anterior</button>
@@ -2348,18 +2395,38 @@ function renderFluxoDiario(){
     <button class="dre-tb" onclick="fcDiaNav(1)">Mês seguinte ›</button>
     <span style="margin-left:auto;font-size:11px;color:var(--muted)">${real.fonte==="extrato"?"🏦 Realizado pelo extrato bancário (data real)":"⚠️ Sem extrato — realizado pelo vencimento do Conta Azul (data aproximada)"}</span>
   </div>`;
-  const base=(modo==="previsto")?dP:dR;
+  const base=(modo==="projetado")?dJ:(modo==="previsto")?dP:dR;
+  const corte=proj?proj.corte:null;
   const minAc=Math.min(...base.dias.map(x=>x.ac));
   const diaFuro=base.dias.find(x=>x.ac<0);
   const totE=base.dias.reduce((a,x)=>a+x.e,0), totS=base.dias.reduce((a,x)=>a+x.s,0);
-  const cards=`<div class="cards">
-    ${kCard("Saldo de abertura",fR(base.abertura),"","var(--muted)",monthLabel(mes)+" · dia 1")}
-    ${kCard("Entradas no mês",fR(totE),"","var(--green)",modo==="previsto"?"Previstas":"Realizadas")}
-    ${kCard("Saídas no mês",fR(totS),"","var(--red)",modo==="previsto"?"Previstas":"Realizadas")}
-    ${kCard("Saldo de fechamento",fR(base.dias[base.dias.length-1].ac),"",base.dias[base.dias.length-1].ac>=0?"var(--blue)":"var(--red)","Último dia")}
-    ${kCard("Menor saldo do mês",fR(minAc),"",minAc>=0?"var(--green)":"var(--red)",diaFuro?("⚠ negativo a partir do dia "+diaFuro.dia):"Nunca fica negativo")}
-  </div>`;
-  const alerta=diaFuro?`<div class="warn-box" style="margin-bottom:10px">⚠️ <b>Alerta de caixa:</b> o saldo fica negativo no dia <b>${diaFuro.dia}/${mes.slice(5)}</b> (${fR(diaFuro.ac)}) considerando o cenário <b>${modo==="previsto"?"previsto":"realizado"}</b>.</div>`:"";
+  let cards;
+  if(modo==="projetado"){
+    // Horizonte de 30 dias a partir de hoje (atravessa a virada de mês)
+    const h0=hojeStr, hf=(()=>{const d=new Date(hojeStr+"T12:00:00");d.setDate(d.getDate()+30);return d.toISOString().slice(0,10);})();
+    const h=buildRangeDias(h0,hf,proj);
+    const minH=h.dias.reduce((a,x)=>x.ac<a.ac?x:a,h.dias[0]);
+    const furoH=h.dias.find(x=>x.ac<0);
+    const noCorte=base.dias.filter(x=>x.d<=corte).slice(-1)[0];
+    const saldoCorte=noCorte?noCorte.ac:base.abertura;
+    const necessidade=minH.ac<0?Math.abs(minH.ac):0;
+    cards=`<div class="cards">
+      ${kCard("Saldo real no dia "+(corte||"").slice(8)+"/"+(corte||"").slice(5,7),fR(saldoCorte),"",saldoCorte>=0?"var(--blue)":"var(--red)","Último dia com movimento real")}
+      ${kCard("Saldo projetado (fim do mês)",fR(base.dias[base.dias.length-1].ac),"",base.dias[base.dias.length-1].ac>=0?"var(--green)":"var(--red)",monthLabel(mes))}
+      ${kCard("Menor saldo — 30 dias",fR(minH.ac),"",minH.ac>=0?"var(--green)":"var(--red)","em "+minH.d.slice(8)+"/"+minH.d.slice(5,7))}
+      ${kCard("Necessidade de caixa",necessidade?fR(necessidade):"—","",necessidade?"var(--red)":"var(--green)",necessidade?("aporte para não furar até "+furoH.d.slice(8)+"/"+furoH.d.slice(5,7)):"Nenhuma nos próximos 30 dias")}
+      ${kCard("A pagar / receber no mês",fR(totS)+" / "+fR(totE),"","var(--muted)","Real + previsto")}
+    </div>`;
+  } else {
+    cards=`<div class="cards">
+      ${kCard("Saldo de abertura",fR(base.abertura),"","var(--muted)",monthLabel(mes)+" · dia 1")}
+      ${kCard("Entradas no mês",fR(totE),"","var(--green)",modo==="previsto"?"Previstas":"Realizadas")}
+      ${kCard("Saídas no mês",fR(totS),"","var(--red)",modo==="previsto"?"Previstas":"Realizadas")}
+      ${kCard("Saldo de fechamento",fR(base.dias[base.dias.length-1].ac),"",base.dias[base.dias.length-1].ac>=0?"var(--blue)":"var(--red)","Último dia")}
+      ${kCard("Menor saldo do mês",fR(minAc),"",minAc>=0?"var(--green)":"var(--red)",diaFuro?("⚠ negativo a partir do dia "+diaFuro.dia):"Nunca fica negativo")}
+    </div>`;
+  }
+  const alerta=diaFuro?`<div class="warn-box" style="margin-bottom:10px">⚠️ <b>Alerta de caixa:</b> o saldo fica negativo no dia <b>${diaFuro.dia}/${mes.slice(5)}</b> (${fR(diaFuro.ac)})${modo==="projetado"?" no cenário projetado (real + contas em aberto)":" considerando o cenário <b>"+(modo==="previsto"?"previsto":"realizado")+"</b>"}.</div>`:"";
   // Gráfico do saldo acumulado
   const graf=`<div class="panel"><div class="pt">Saldo acumulado dia a dia <span class="pt-badge">${monthLabel(mes)}</span></div>
     <div class="cwrap">${barG(base.dias.map(x=>String(x.dia)),[{nm:"Saldo",v:base.dias.map(x=>x.ac),c:base.dias.map(x=>x.ac>=0?"var(--green)":"var(--red)")}],760,180)}</div></div>`;
@@ -2385,16 +2452,22 @@ function renderFluxoDiario(){
         <td class="r mn" style="font-size:10px;font-weight:600;color:${r.ac>=0?"var(--blue)":"var(--red)"}">${fR(r.ac)}</td></tr>`;
     });
   } else {
-    head=`<tr><th>Dia</th><th class="r" style="color:var(--green)">↑ Entradas</th><th class="r" style="color:var(--red)">↓ Saídas</th><th class="r">Saldo do dia</th><th class="r">Saldo acumulado</th><th class="r" style="width:60px">Lanç.</th></tr>`;
+    head=`<tr><th>Dia</th><th class="r" style="color:var(--green)">↑ Entradas</th><th class="r" style="color:var(--red)">↓ Saídas</th><th class="r">Saldo do dia</th><th class="r">Saldo acumulado</th>${corte?'<th class="r" style="width:70px">Origem</th>':'<th class="r" style="width:60px">Lanç.</th>'}</tr>`;
+    let marcouCorte=false;
     base.dias.forEach(r=>{
       const vazio=!r.itens.length, hoje=r.d===hojeStr;
+      const ehPrev=corte&&r.d>corte;
+      if(corte&&ehPrev&&!marcouCorte){
+        marcouCorte=true;
+        body+=`<tr><td colspan="6" style="padding:3px 8px;background:rgba(196,98,45,.10);font-size:10px;color:var(--brand);font-weight:600">▼ daqui para frente: PREVISTO (contas em aberto por vencimento) — saldo real apurado até ${corte.slice(8)}/${corte.slice(5,7)}</td></tr>`;
+      }
       body+=`<tr class="${r.itens.length?"fcd-main":""}" ${r.itens.length?`onclick="fcDiaDrill('${r.d}')" style="cursor:pointer;`:'style="'}${vazio?"opacity:.45;":""}${hoje?"background:rgba(196,98,45,.09);font-weight:600;":""}">
         <td>${r.itens.length?`<span id="fcico-${r.d}" style="font-size:9px;opacity:.5">▶</span> `:""}${r.dia} <span style="font-size:9px;color:var(--muted)">${dn[r.dow]}</span>${hoje?' <span style="font-size:9px;color:var(--brand)">hoje</span>':""}</td>
         <td class="r mn" style="color:var(--green);font-size:11px">${r.e?fR(r.e):"—"}</td>
         <td class="r mn" style="color:var(--red);font-size:11px">${r.s?fR(r.s):"—"}</td>
         <td class="r mn" style="font-size:11px;color:${r.sm>=0?"var(--green)":"var(--red)"}">${r.itens.length?fR(r.sm):"—"}</td>
         <td class="r mn" style="font-size:11px;font-weight:600;color:${r.ac>=0?"var(--blue)":"var(--red)"}">${fR(r.ac)}</td>
-        <td class="r" style="font-size:10px;color:var(--muted)">${r.itens.length||""}</td></tr>`;
+        <td class="r" style="font-size:9px;color:var(--muted)">${corte?(ehPrev?'<span style="color:var(--brand)">📋 prev</span>':'<span style="color:var(--green)">✅ real</span>'):(r.itens.length||"")}</td></tr>`;
       r.itens.forEach((it,k)=>{
         body+=`<tr class="fcd-sub fcd-sub-${r.d}" style="display:none">
           <td style="padding-left:26px;font-size:10px;color:var(--muted)">↳ ${(it.c||"Sem categoria")}</td>
@@ -2405,7 +2478,7 @@ function renderFluxoDiario(){
     });
   }
   return nav+alerta+cards+graf+
-    `<div class="src-info">📅 Fluxo diário — ${modo==="realizado"?"realizado (movimento efetivo)":modo==="previsto"?"previsto (lançamentos por vencimento)":"previsto × realizado"} · Saldo de abertura inclui todo o histórico anterior ao mês · Clique no dia para ver os lançamentos</div>
+    `<div class="src-info">📅 Fluxo diário — ${modo==="realizado"?"realizado (movimento efetivo)":modo==="previsto"?"previsto (lançamentos por vencimento)":modo==="projetado"?`🔗 projetado: saldo real até ${corte?corte.slice(8)+"/"+corte.slice(5,7):"hoje"}${proj&&proj.temExtrato?" (extrato"+(proj.ultimoEx<corte?" + CA quitado":"")+")":" (Conta Azul)"}, depois contas em aberto por vencimento${proj&&!proj.temPrev?" · ⚠ nenhuma conta em aberto lançada para o futuro":""}`:"previsto × realizado"} · Saldo de abertura inclui todo o histórico anterior ao mês · Clique no dia para ver os lançamentos</div>
     <div class="panel"><div class="pt">Detalhamento diário — ${monthLabel(mes)}</div>
     <div class="tw"><table style="width:100%;min-width:${modo==="ambos"?760:700}px"><thead>${head}</thead><tbody>${body}</tbody></table></div></div>`;
 }
@@ -2424,7 +2497,7 @@ window.fcDiaNav=function(delta){
   FC_DIA_MES=y+"-"+String(m).padStart(2,"0");
   renderFluxo();
 };
-window.setFCView=function(v){FC_VIEW=v;renderFluxo();};
+window.setFCView=function(v){FC_VIEW=v;if(v==="mensal"&&FC_MODE==="projetado")FC_MODE="realizado";renderFluxo();};
 function renderFluxo(){
   const el=document.getElementById("sec-fluxo");if(!APP){el.innerHTML=splashHTML();return;}
 
@@ -2436,6 +2509,7 @@ function renderFluxo(){
       <button class="dre-tb${FC_MODE==="realizado"?" a":""}" onclick="setFCMode('realizado')">✅ Realizado</button>
       <button class="dre-tb${FC_MODE==="previsto"?" a":""}" onclick="setFCMode('previsto')">📋 Previsto</button>
       <button class="dre-tb${FC_MODE==="ambos"?" a":""}" onclick="setFCMode('ambos')">📊 Ambos</button>
+      ${FC_VIEW==="diario"?`<button class="dre-tb${FC_MODE==="projetado"?" a":""}" onclick="setFCMode('projetado')" title="Saldo real até o último dia apurado e previsto daí em diante">🔗 Projetado</button>`:""}
     </span>
   </div>`;
 
