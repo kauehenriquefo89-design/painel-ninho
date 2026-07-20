@@ -2286,20 +2286,34 @@ function renderCat(){
 // ── FLUXO DE CAIXA DIÁRIO ──────────────────────────────────────────────────
 // Realizado: extrato bancário (data real). Sem extrato → CA por vencimento (badge avisa).
 // Previsto: lançamentos do CA por data_vencimento.
+// Lançamentos JÁ QUITADOS no Conta Azul, ignorando o intervalo já coberto pelo extrato
+// (dentro da janela do extrato o banco já é a verdade → evita contar duas vezes)
+function caQuitadoRows(pulaIni,pulaFim){
+  const rows=[];if(!CA_DATA)return rows;
+  const cat=it=>(it.categorias&&it.categorias[0]&&it.categorias[0].nome)||"";
+  const dv=it=>(it.data_vencimento||it.data_competencia||"").slice(0,10);
+  // Dentro da janela do extrato o banco é soberano. A borda inicial vai até o 1º dia do
+  // mês em que o extrato começa — senão lançamentos por competência (ex.: pago dia 2,
+  // compensado dia 5) entrariam de novo e duplicariam o movimento.
+  const ini=pulaIni?pulaIni.slice(0,8)+"01":null;
+  const dentro=d=>ini&&pulaFim&&d>=ini&&d<=pulaFim;
+  (CA_DATA.cr||[]).forEach(it=>{const p=toNum(it.pago||0);if(p<=0||isTransfer(it))return;const d=dv(it);
+    if(!d||dentro(d))return;
+    rows.push({d,v:p,ds:(it.cliente&&(it.cliente.nome||it.cliente.razao_social))||it.descricao||"Recebimento",c:cat(it),k:"R",f:"ca"});});
+  (CA_DATA.cp||[]).forEach(it=>{const p=toNum(it.pago||0);if(p<=0||isTransfer(it))return;const d=dv(it);
+    if(!d||dentro(d))return;
+    rows.push({d,v:-p,ds:it.descricao||"Pagamento",c:cat(it),k:"R",f:"ca"});});
+  return rows;
+}
+// REALIZADO em camadas: extrato vale na janela que ele cobre; fora dela, Conta Azul quitado
 function fcDiarioFonteReal(){
-  const ex=extratoRows();
-  if(ex.length)return{rows:ex,fonte:"extrato"};
-  // Fallback: Conta Azul por vencimento, apenas quitados
-  const rows=[];
-  if(CA_DATA){
-    (CA_DATA.cr||[]).forEach(it=>{const p=toNum(it.pago||0);if(p<=0||isTransfer(it))return;
-      const d=(it.data_vencimento||it.data_competencia||"").slice(0,10);if(!d)return;
-      rows.push({d,v:p,ds:(it.cliente&&(it.cliente.nome||it.cliente.razao_social))||it.descricao||"Recebimento",c:(it.categorias&&it.categorias[0]&&it.categorias[0].nome)||""});});
-    (CA_DATA.cp||[]).forEach(it=>{const p=toNum(it.pago||0);if(p<=0||isTransfer(it))return;
-      const d=(it.data_vencimento||it.data_competencia||"").slice(0,10);if(!d)return;
-      rows.push({d,v:-p,ds:it.descricao||"Pagamento",c:(it.categorias&&it.categorias[0]&&it.categorias[0].nome)||""});});
-  }
-  return{rows,fonte:"ca"};
+  const ex=extratoRows().map(r=>({...r,k:"R",f:"banco"}));
+  const ds=ex.map(r=>r.d).sort();
+  const exMin=ds[0]||null, exMax=ds[ds.length-1]||null;
+  const ca=caQuitadoRows(exMin,exMax);
+  const rows=[...ex,...ca];
+  const fonte=ex.length?(ca.length?"hibrido":"extrato"):"ca";
+  return{rows,fonte,exMin,exMax};
 }
 function fcDiarioFontePrev(){
   const rows=[];
@@ -2339,15 +2353,9 @@ function fcDiarioFonteProj(){
   const nomeCli=it=>(it.cliente&&(it.cliente.nome||it.cliente.razao_social))||it.descricao||"Recebimento";
   const cat=it=>(it.categorias&&it.categorias[0]&&it.categorias[0].nome)||"";
   const dv=it=>(it.data_vencimento||it.data_competencia||"").slice(0,10);
-  const rows=extratoRows().map(r=>({d:r.d,v:r.v,ds:r.ds,c:r.c,u:r.u,k:"R",f:"banco"}));
-  const ultimoEx=rows.length?rows.map(r=>r.d).sort().slice(-1)[0]:"";
-  // Camada 2: lançamentos já quitados no CA depois do extrato e até hoje (cobre os dias que o extrato ainda não trouxe)
-  if(CA_DATA){
-    (CA_DATA.cr||[]).forEach(it=>{const p=toNum(it.pago||0);if(p<=0||isTransfer(it))return;const d=dv(it);
-      if(!d||d<=ultimoEx||d>hoje)return; rows.push({d,v:p,ds:nomeCli(it),c:cat(it),k:"R",f:"ca"});});
-    (CA_DATA.cp||[]).forEach(it=>{const p=toNum(it.pago||0);if(p<=0||isTransfer(it))return;const d=dv(it);
-      if(!d||d<=ultimoEx||d>hoje)return; rows.push({d,v:-p,ds:it.descricao||"Pagamento",c:cat(it),k:"R",f:"ca"});});
-  }
+  const real=fcDiarioFonteReal();               // extrato + CA quitado (camadas 1 e 2)
+  const rows=real.rows.filter(r=>r.d<=hoje);    // realizado nunca passa de hoje
+  const ultimoEx=real.exMax||"";
   let corte=rows.length?rows.map(r=>r.d).sort().slice(-1)[0]:hoje;
   if(corte>hoje)corte=hoje;
   // Camada 3: em aberto (total − pago) com vencimento depois do corte = previsão
@@ -2393,7 +2401,7 @@ function renderFluxoDiario(){
     <button class="dre-tb" onclick="fcDiaNav(-1)">‹ Mês anterior</button>
     <b style="font-size:14px;color:var(--brand)">${monthLabel(mes)}</b>
     <button class="dre-tb" onclick="fcDiaNav(1)">Mês seguinte ›</button>
-    <span style="margin-left:auto;font-size:11px;color:var(--muted)">${real.fonte==="extrato"?"🏦 Realizado pelo extrato bancário (data real)":"⚠️ Sem extrato — realizado pelo vencimento do Conta Azul (data aproximada)"}</span>
+    <span style="margin-left:auto;font-size:11px;color:var(--muted)">${real.fonte==="extrato"?`🏦 Extrato bancário (${(real.exMin||"").slice(8)}/${(real.exMin||"").slice(5,7)} a ${(real.exMax||"").slice(8)}/${(real.exMax||"").slice(5,7)})`:real.fonte==="hibrido"?`🏦 Extrato ${(real.exMin||"").slice(5,7)}/${(real.exMin||"").slice(2,4)}–${(real.exMax||"").slice(5,7)}/${(real.exMax||"").slice(2,4)} + Conta Azul no restante`:"⚠️ Sem extrato — realizado pelo vencimento do Conta Azul (data aproximada)"}</span>
   </div>`;
   const base=(modo==="projetado")?dJ:(modo==="previsto")?dP:dR;
   const corte=proj?proj.corte:null;
@@ -2477,7 +2485,9 @@ function renderFluxoDiario(){
       });
     });
   }
-  return nav+alerta+cards+graf+
+  const semMov=base.dias.every(x=>!x.itens.length);
+  const avisoVazio=semMov?`<div class="warn-box" style="margin-bottom:10px">ℹ️ <b>Nenhum movimento em ${monthLabel(mes)}</b> nas fontes disponíveis${real.exMin?` — o extrato bancário cobre de ${real.exMin.slice(8)}/${real.exMin.slice(5,7)}/${real.exMin.slice(2,4)} a ${real.exMax.slice(8)}/${real.exMax.slice(5,7)}/${real.exMax.slice(2,4)}`:""}. O saldo mostrado é o acumulado herdado dos meses anteriores. Carregue um extrato mais recente ou escolha outro mês.</div>`:"";
+  return nav+alerta+avisoVazio+cards+graf+
     `<div class="src-info">📅 Fluxo diário — ${modo==="realizado"?"realizado (movimento efetivo)":modo==="previsto"?"previsto (lançamentos por vencimento)":modo==="projetado"?`🔗 projetado: saldo real até ${corte?corte.slice(8)+"/"+corte.slice(5,7):"hoje"}${proj&&proj.temExtrato?" (extrato"+(proj.ultimoEx<corte?" + CA quitado":"")+")":" (Conta Azul)"}, depois contas em aberto por vencimento${proj&&!proj.temPrev?" · ⚠ nenhuma conta em aberto lançada para o futuro":""}`:"previsto × realizado"} · Saldo de abertura inclui todo o histórico anterior ao mês · Clique no dia para ver os lançamentos</div>
     <div class="panel"><div class="pt">Detalhamento diário — ${monthLabel(mes)}</div>
     <div class="tw"><table style="width:100%;min-width:${modo==="ambos"?760:700}px"><thead>${head}</thead><tbody>${body}</tbody></table></div></div>`;
