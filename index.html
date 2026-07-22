@@ -973,24 +973,28 @@ function processData(silent){
   // OFX fica disponível como conferência mas não substitui o CA categorizadocorreto
   let fcData;
   {
-    // Conta Azul com data_pagamento real — com breakdown por grupo
-    const fcMeses=[...new Set([...crFC,...cpFC].map(r=>r.mes).filter(Boolean))].sort();
-    let acum=SALDO_INICIAL_DEZ;
+    // REALIZADO por CAIXA (data real): usa a MESMA fonte do fluxo diário
+    // (extrato bancário manda na data; CA quitado só preenche o que o extrato não cobre).
+    // Assim o realizado mensal = soma exata dos dias, e bate com o saldo do banco.
+    const realSrc=(typeof fcDiarioFonteReal==="function")?fcDiarioFonteReal():{rows:[]};
+    const rr=(realSrc.rows||[]).filter(r=>r.d&&r.v);
+    const fcMeses=[...new Set(rr.map(r=>r.d.slice(0,7)))].sort();
+    let acum=saldoInicialUnidade();
     fcData=fcMeses.map(m=>{
-      const crM=crFC.filter(r=>r.mes===m);
-      const cpM=cpFC.filter(r=>r.mes===m);
-      const e=crM.reduce((a,r)=>a+r.recebido,0);
-      // Saídas por grupo
-      const rep=cpM.filter(r=>r.grupo==="repasse").reduce((a,r)=>a+r.pago,0);
-      const com=cpM.filter(r=>r.grupo==="comercial").reduce((a,r)=>a+r.pago,0);
-      const adm=cpM.filter(r=>r.grupo==="administrativo").reduce((a,r)=>a+r.pago,0);
-      const fin=cpM.filter(r=>r.grupo==="financeiro").reduce((a,r)=>a+r.pago,0);
-      const rend=cpM.filter(r=>r.grupo==="rendimento").reduce((a,r)=>a+r.pago,0);
-      const emp=cpM.filter(r=>r.grupo==="emprestimo").reduce((a,r)=>a+r.pago,0);
-      const imp=cpM.filter(r=>r.grupo==="imposto").reduce((a,r)=>a+r.pago,0);
-      const s=rep+com+adm+fin+emp+imp;
-      const sm=e-s+rend;acum+=sm;
-      return{m:monthLabel(m),mes:m,e,s,sm,ac:acum,fonte:"ca",rep,com,adm,fin,rend,emp,imp};
+      const its=rr.filter(r=>r.d.slice(0,7)===m);
+      const e=its.filter(r=>r.v>0).reduce((a,r)=>a+r.v,0);
+      // Saídas por grupo — classifica a saída pela categoria (extrato traz categoria; CA idem)
+      const g=grp=>its.filter(r=>r.v<0&&getGrupoCp(r.c||"")===grp).reduce((a,r)=>a-r.v,0);
+      const rep=g("repasse"),com=g("comercial"),adm=g("administrativo"),fin=g("financeiro"),emp=g("emprestimo"),imp=g("imposto");
+      const rend=its.filter(r=>r.v>0&&getGrupoCp(r.c||"")==="rendimento").reduce((a,r)=>a+r.v,0);
+      // Saídas que não caíram em nenhum grupo conhecido (ex.: extrato sem categoria) → administrativo
+      const somaGrupos=rep+com+adm+fin+emp+imp;
+      const saidaTotal=its.filter(r=>r.v<0).reduce((a,r)=>a-r.v,0);
+      const outros=saidaTotal-somaGrupos;
+      const admAj=adm+(outros>0?outros:0);
+      const s=rep+com+admAj+fin+emp+imp;
+      const sm=e-s;acum+=sm;
+      return{m:monthLabel(m),mes:m,e,s,sm,ac:acum,fonte:realSrc.fonte||"caixa",rep,com,adm:admAj,fin,rend,emp,imp};
     });
   }  // end FC build
 
@@ -2390,8 +2394,11 @@ function renderFluxoDiario(){
   const hojeStr=new Date().toISOString().slice(0,10);
   // Mês: usa o selecionado; senão o último com movimento; senão o mês atual
   const real=fcDiarioFonteReal(), prev=fcDiarioFontePrev();
-  const universo=[...real.rows,...prev.rows].map(r=>r.d.slice(0,7)).filter(Boolean).sort();
-  let mes=(CUR_MES&&CUR_MES!=="TOTAL")?CUR_MES:(universo.length?universo[universo.length-1]:hojeStr.slice(0,7));
+  // Mês padrão: o último com movimento REAL, sem passar do mês atual
+  // (o CA traz vencimentos até o ano seguinte — usá-los aqui abriria o painel no futuro, vazio)
+  const mesHoje=hojeStr.slice(0,7);
+  const mesesReais=real.rows.map(r=>r.d.slice(0,7)).filter(m=>m&&m<=mesHoje).sort();
+  let mes=(CUR_MES&&CUR_MES!=="TOTAL")?CUR_MES:(mesesReais.length?mesesReais[mesesReais.length-1]:mesHoje);
   if(FC_DIA_MES)mes=FC_DIA_MES;
   const proj=(FC_MODE==="projetado")?fcDiarioFonteProj():null;
   const dR=buildDiario(mes,real), dP=buildDiario(mes,prev);
@@ -2406,7 +2413,8 @@ function renderFluxoDiario(){
   const base=(modo==="projetado")?dJ:(modo==="previsto")?dP:dR;
   const corte=proj?proj.corte:null;
   const minAc=Math.min(...base.dias.map(x=>x.ac));
-  const diaFuro=base.dias.find(x=>x.ac<0);
+  const temMov=base.dias.some(x=>x.itens.length);
+  const diaFuro=temMov?base.dias.find(x=>x.ac<0):null; // sem movimento, o saldo é só herdado — não é "furo" deste mês
   const totE=base.dias.reduce((a,x)=>a+x.e,0), totS=base.dias.reduce((a,x)=>a+x.s,0);
   let cards;
   if(modo==="projetado"){
@@ -2486,7 +2494,7 @@ function renderFluxoDiario(){
     });
   }
   const semMov=base.dias.every(x=>!x.itens.length);
-  const avisoVazio=semMov?`<div class="warn-box" style="margin-bottom:10px">ℹ️ <b>Nenhum movimento em ${monthLabel(mes)}</b> nas fontes disponíveis${real.exMin?` — o extrato bancário cobre de ${real.exMin.slice(8)}/${real.exMin.slice(5,7)}/${real.exMin.slice(2,4)} a ${real.exMax.slice(8)}/${real.exMax.slice(5,7)}/${real.exMax.slice(2,4)}`:""}. O saldo mostrado é o acumulado herdado dos meses anteriores. Carregue um extrato mais recente ou escolha outro mês.</div>`:"";
+  const avisoVazio=semMov?`<div class="warn-box" style="margin-bottom:10px">ℹ️ <b>Nenhum movimento em ${monthLabel(mes)}</b> nas fontes disponíveis${real.exMin?` — o extrato bancário cobre de ${real.exMin.slice(8)}/${real.exMin.slice(5,7)}/${real.exMin.slice(2,4)} a ${real.exMax.slice(8)}/${real.exMax.slice(5,7)}/${real.exMax.slice(2,4)}`:""}. O saldo mostrado é o acumulado herdado dos meses anteriores.${mesesReais.length&&mes>mesesReais[mesesReais.length-1]?` <a href="#" onclick="fcDiaIr('${mesesReais[mesesReais.length-1]}');return false" style="color:var(--brand);font-weight:600">Ir para ${monthLabel(mesesReais[mesesReais.length-1])} →</a>`:""}</div>`:"";
   return nav+alerta+avisoVazio+cards+graf+
     `<div class="src-info">📅 Fluxo diário — ${modo==="realizado"?"realizado (movimento efetivo)":modo==="previsto"?"previsto (lançamentos por vencimento)":modo==="projetado"?`🔗 projetado: saldo real até ${corte?corte.slice(8)+"/"+corte.slice(5,7):"hoje"}${proj&&proj.temExtrato?" (extrato"+(proj.ultimoEx<corte?" + CA quitado":"")+")":" (Conta Azul)"}, depois contas em aberto por vencimento${proj&&!proj.temPrev?" · ⚠ nenhuma conta em aberto lançada para o futuro":""}`:"previsto × realizado"} · Saldo de abertura inclui todo o histórico anterior ao mês · Clique no dia para ver os lançamentos</div>
     <div class="panel"><div class="pt">Detalhamento diário — ${monthLabel(mes)}</div>
@@ -2507,6 +2515,7 @@ window.fcDiaNav=function(delta){
   FC_DIA_MES=y+"-"+String(m).padStart(2,"0");
   renderFluxo();
 };
+window.fcDiaIr=function(m){FC_DIA_MES=m;renderFluxo();};
 window.setFCView=function(v){FC_VIEW=v;if(v==="mensal"&&FC_MODE==="projetado")FC_MODE="realizado";renderFluxo();};
 function renderFluxo(){
   const el=document.getElementById("sec-fluxo");if(!APP){el.innerHTML=splashHTML();return;}
