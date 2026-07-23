@@ -257,6 +257,21 @@ function normalizarCPfuture(item){
 }
 
 // ── DRE CATEGORY GROUPING (based on real Conta Azul categories) ──
+// Classifica uma linha de CAIXA (extrato/CA) num grupo da DRE.
+// O extrato usa vocabulário próprio (Categoria FdC) que o getGrupoCp não conhece,
+// então mapeamos por palavra-chave antes de cair no default.
+function grupoCaixa(cat){
+  const c=(cat||"").toLowerCase().trim();
+  if(!c)return null; // sem categoria → tratado como "outros" (vai p/ administrativo agregado)
+  if(c.includes("profiss")||c.includes("repasse"))return "repasse";
+  if(c.includes("imposto")||c.includes("darf")||c.includes("das ")||c==="das"||c.includes("inss")||c.includes("fgts")||c.includes("iss")||c.includes("pis")||c.includes("cofins")||c.includes("irpj")||c.includes("csll")||c.includes("iptu")||c.includes("tribut"))return "imposto";
+  if(c.includes("marketing")||c.includes("publicidade")||c.includes("brinde")||c.includes("comerci")||c.includes("propaganda")||c.includes("anúncio")||c.includes("anuncio")||c.includes("trafego")||c.includes("tráfego"))return "comercial";
+  if(c.includes("tarifa")||c.includes("bancar")||c.includes("bancár")||c.includes("juros")||c.includes("iof")||c.includes("financ"))return "financeiro";
+  if(c.includes("rendimento")||c.includes("aplicac")||c.includes("aplicaç"))return "rendimento";
+  if(c.includes("emprest")||c.includes("emprést")||c.includes("divida")||c.includes("dívida")||c.includes("financiamento")||c.includes("amortiz"))return "emprestimo";
+  if(c.includes("identificar"))return null; // "(-) Pagamentos a identificar" → outros (administrativo)
+  return getGrupoCp(cat); // demais (Aluguel, Água, Secretária, Manutenção, Contabilidade...) → administrativo
+}
 function getGrupoCp(cat) {
   const c = (cat||"").toLowerCase().trim();
   if (c==="pis"||c==="cofins"||c==="iss"||c==="csll"||c==="irpj"||c==="irpj adicional") return "imposto";
@@ -984,9 +999,9 @@ function processData(silent){
       const its=rr.filter(r=>r.d.slice(0,7)===m);
       const e=its.filter(r=>r.v>0).reduce((a,r)=>a+r.v,0);
       // Saídas por grupo — classifica a saída pela categoria (extrato traz categoria; CA idem)
-      const g=grp=>its.filter(r=>r.v<0&&getGrupoCp(r.c||"")===grp).reduce((a,r)=>a-r.v,0);
+      const g=grp=>its.filter(r=>r.v<0&&grupoCaixa(r.c)===grp).reduce((a,r)=>a-r.v,0);
       const rep=g("repasse"),com=g("comercial"),adm=g("administrativo"),fin=g("financeiro"),emp=g("emprestimo"),imp=g("imposto");
-      const rend=its.filter(r=>r.v>0&&getGrupoCp(r.c||"")==="rendimento").reduce((a,r)=>a+r.v,0);
+      const rend=its.filter(r=>r.v>0&&grupoCaixa(r.c)==="rendimento").reduce((a,r)=>a+r.v,0);
       // Saídas que não caíram em nenhum grupo conhecido (ex.: extrato sem categoria) → administrativo
       const somaGrupos=rep+com+adm+fin+emp+imp;
       const saidaTotal=its.filter(r=>r.v<0).reduce((a,r)=>a-r.v,0);
@@ -1162,6 +1177,62 @@ function saldoInicialUnidade(){
   return SALDO_INICIAL_DEZ;
 }
 // Movimentos bancários (extrato) da unidade ativa → [{d,v,ds,c}]
+// ── CONCILIAÇÃO extrato × Conta Azul ───────────────────────────────────────
+// O CA da Lapa tem categoria rica mas NÃO tem data de pagamento (endpoints de
+// "baixas" retornam 404). O extrato tem data/valor reais mas não tem categoria.
+// Casamos cada lançamento do banco com a conta do CA por VALOR + data próxima
+// para herdar a categoria. Sem match → palavra-chave na descrição do banco.
+let FC_CONC={tot:0,ca:0,desc:0,sem:0};
+function classificaDescricaoBanco(ds){
+  const s=(ds||"").toLowerCase();
+  if(!s)return "";
+  if(s.includes("tarifa")||s.includes("cesta")||s.includes("iof")||s.includes("juros")||s.includes("anuidade")||s.includes("manutencao de conta")||s.includes("pacote de servi"))return "Tarifas Bancárias";
+  if(s.includes("darf")||s.includes("gps ")||s.includes("das ")||s.includes("simples nacional")||s.includes("inss")||s.includes("fgts")||s.includes("iss")||s.includes("iptu")||s.includes("tribut")||s.includes("imposto"))return "Impostos";
+  if(s.includes("rend pago")||s.includes("rendimento")||s.includes("aplicac")||s.includes("aplicaç")||s.includes("resgate"))return "Rendimentos";
+  if(s.includes("emprest")||s.includes("emprést")||s.includes("financiamento")||s.includes("amortiz")||s.includes("parcela credito"))return "Empréstimo";
+  if(s.includes("salario")||s.includes("salário")||s.includes("folha")||s.includes("pro labore")||s.includes("pró-labore")||s.includes("prolabore"))return "Salários";
+  if(s.includes("aluguel"))return "Aluguel";
+  return "";
+}
+function concInfo(){
+  const t=FC_CONC.tot; if(!t)return "";
+  const pct=Math.round((FC_CONC.ca/t)*100);
+  let s=` · 🔗 ${FC_CONC.ca}/${t} lançamentos do banco com categoria do Conta Azul (${pct}%)`;
+  if(FC_CONC.desc)s+=`, ${FC_CONC.desc} pela descrição`;
+  if(FC_CONC.sem)s+=`, ${FC_CONC.sem} sem categoria → Desp. Adm.`;
+  return s;
+}
+function conciliarExtrato(exRows){
+  FC_CONC={tot:exRows.length,ca:0,desc:0,sem:0};
+  if(!exRows.length)return exRows;
+  // índice do CA: valor em centavos → lista de {d, cat, sinal}
+  const idx=new Map();
+  const add=(it,sinal)=>{
+    const pago=toNum(it.pago||0); if(pago<=0||isTransfer(it))return;
+    const d=(it.data_vencimento||it.data_competencia||"").slice(0,10); if(!d)return;
+    const cat=(it.categorias&&it.categorias[0]&&it.categorias[0].nome)||"";
+    if(!cat)return;
+    const k=Math.round(pago*100)+"|"+sinal;
+    if(!idx.has(k))idx.set(k,[]);
+    idx.get(k).push({d,cat,usado:false});
+  };
+  if(CA_DATA){(CA_DATA.cr||[]).forEach(it=>add(it,1));(CA_DATA.cp||[]).forEach(it=>add(it,-1));}
+  const dias=(a,b)=>Math.abs((new Date(a+"T12:00:00")-new Date(b+"T12:00:00"))/86400000);
+  const JANELA=10; // dias de tolerância entre vencimento e pagamento efetivo
+  return exRows.map(r=>{
+    if(r.c){FC_CONC.ca++;return r;} // extrato já traz categoria (caso da VM)
+    const k=Math.round(Math.abs(r.v)*100)+"|"+(r.v>0?1:-1);
+    const cands=idx.get(k);
+    if(cands){
+      let melhor=null,melhorD=Infinity;
+      for(const c of cands){ if(c.usado)continue; const dd=dias(r.d,c.d); if(dd<=JANELA&&dd<melhorD){melhor=c;melhorD=dd;} }
+      if(melhor){melhor.usado=true;FC_CONC.ca++;return{...r,c:melhor.cat,conc:"ca"};}
+    }
+    const porDesc=classificaDescricaoBanco(r.ds);
+    if(porDesc){FC_CONC.desc++;return{...r,c:porDesc,conc:"desc"};}
+    FC_CONC.sem++;return r;
+  });
+}
 function extratoRows(){
   const out=[];
   if(UNIT==="vm"||UNIT==="consolidado"){
@@ -2311,7 +2382,7 @@ function caQuitadoRows(pulaIni,pulaFim){
 }
 // REALIZADO em camadas: extrato vale na janela que ele cobre; fora dela, Conta Azul quitado
 function fcDiarioFonteReal(){
-  const ex=extratoRows().map(r=>({...r,k:"R",f:"banco"}));
+  const ex=conciliarExtrato(extratoRows()).map(r=>({...r,k:"R",f:"banco"}));
   const ds=ex.map(r=>r.d).sort();
   const exMin=ds[0]||null, exMax=ds[ds.length-1]||null;
   const ca=caQuitadoRows(exMin,exMax);
@@ -2496,7 +2567,7 @@ function renderFluxoDiario(){
   const semMov=base.dias.every(x=>!x.itens.length);
   const avisoVazio=semMov?`<div class="warn-box" style="margin-bottom:10px">ℹ️ <b>Nenhum movimento em ${monthLabel(mes)}</b> nas fontes disponíveis${real.exMin?` — o extrato bancário cobre de ${real.exMin.slice(8)}/${real.exMin.slice(5,7)}/${real.exMin.slice(2,4)} a ${real.exMax.slice(8)}/${real.exMax.slice(5,7)}/${real.exMax.slice(2,4)}`:""}. O saldo mostrado é o acumulado herdado dos meses anteriores.${mesesReais.length&&mes>mesesReais[mesesReais.length-1]?` <a href="#" onclick="fcDiaIr('${mesesReais[mesesReais.length-1]}');return false" style="color:var(--brand);font-weight:600">Ir para ${monthLabel(mesesReais[mesesReais.length-1])} →</a>`:""}</div>`:"";
   return nav+alerta+avisoVazio+cards+graf+
-    `<div class="src-info">📅 Fluxo diário — ${modo==="realizado"?"realizado (movimento efetivo)":modo==="previsto"?"previsto (lançamentos por vencimento)":modo==="projetado"?`🔗 projetado: saldo real até ${corte?corte.slice(8)+"/"+corte.slice(5,7):"hoje"}${proj&&proj.temExtrato?" (extrato"+(proj.ultimoEx<corte?" + CA quitado":"")+")":" (Conta Azul)"}, depois contas em aberto por vencimento${proj&&!proj.temPrev?" · ⚠ nenhuma conta em aberto lançada para o futuro":""}`:"previsto × realizado"} · Saldo de abertura inclui todo o histórico anterior ao mês · Clique no dia para ver os lançamentos</div>
+    `<div class="src-info">📅 Fluxo diário — ${modo==="realizado"?"realizado (movimento efetivo)":modo==="previsto"?"previsto (lançamentos por vencimento)":modo==="projetado"?`🔗 projetado: saldo real até ${corte?corte.slice(8)+"/"+corte.slice(5,7):"hoje"}${proj&&proj.temExtrato?" (extrato"+(proj.ultimoEx<corte?" + CA quitado":"")+")":" (Conta Azul)"}, depois contas em aberto por vencimento${proj&&!proj.temPrev?" · ⚠ nenhuma conta em aberto lançada para o futuro":""}`:"previsto × realizado"} · Saldo de abertura inclui todo o histórico anterior ao mês · Clique no dia para ver os lançamentos${modo!=="previsto"?concInfo():""}</div>
     <div class="panel"><div class="pt">Detalhamento diário — ${monthLabel(mes)}</div>
     <div class="tw"><table style="width:100%;min-width:${modo==="ambos"?760:700}px"><thead>${head}</thead><tbody>${body}</tbody></table></div></div>`;
 }
@@ -2568,7 +2639,7 @@ function renderFluxo(){
   <div class="cwrap">${barG(fc.map(r=>r.m),[{nm:"Entradas",v:fc.map(r=>r.e),c:"var(--green)"},{nm:"Saídas",v:fc.map(r=>r.s),c:"var(--red)"}],760)}</div></div>
   <div class="panel"><div class="pt">Saldo Acumulado</div>
   <div class="cwrap">${barG(fc.map(r=>r.m),[{nm:"Saldo",v:fc.map(r=>r.ac),c:fc.map(r=>r.ac>=0?"var(--green)":"var(--red)")}],760,180)}</div></div>
-  <div class="src-info">💰 ${FC_MODE==="realizado"?"✅ Realizado: datas reais de pagamento/recebimento":FC_MODE==="previsto"?"📋 Previsto: datas de vencimento · total do lançamento":"📊 Realizado + Previsto"} · Conta Azul · Saldo inicial Dez/25: R$ 40.003</div>
+  <div class="src-info">💰 ${FC_MODE==="realizado"?"✅ Realizado: regime caixa — só o que entrou/saiu do banco (extrato manda na data)"+concInfo():FC_MODE==="previsto"?"📋 Previsto: datas de vencimento · total do lançamento · Conta Azul":"📊 Realizado + Previsto"} · Saldo inicial: ${fR(saldoInicialUnidade())}</div>
   <div class="panel"><div class="pt">Detalhamento — ${FC_MODE==="realizado"?"✅ Realizado (valores quitados/recebidos)":FC_MODE==="previsto"?"📋 Previsto (datas de vencimento)":"📊 Realizado"}</div>
   <div class="tw"><table style="width:100%;min-width:800px"><thead><tr>
     <th>Mês</th>
