@@ -530,12 +530,10 @@ function parseAtRow(r){
   const familia=(String(r["Família"]||r["Familia"]||r["família"]||"").trim().replace(/\s+/g," "))||"Sem família";
   const paciente=String(r["Paciente"]||"").trim();
   const prof=String(r["Profissional"]||"").trim();
-  // Valor bruto
-  const rb=toNum(r["Valor"]||r["Valor Bruto"]||0);
-  const desc=toNum(r["Desconto"]||0);
-  // Receita Clínica: "Valor a Receber" pode ser fórmula → usa Valor - Desconto
-  let rl=toNum(r["Valor a Receber"]||r["Receita Clínica"]||r["Receita Clinica"]||0);
-  if(!rl&&rb)rl=rb-desc;
+  // Faturamento = coluna "Valor a Receber" (col. I). O Desconto NÃO é trazido.
+  // Aliases de cabeçalho aceitos; sem fallback para "Valor - Desconto".
+  const rl=toNum(r["Valor a Receber"]||r["Receita Clínica"]||r["Receita Clinica"]||0);
+  const rb=rl;
   // Repasse
   const rep=toNum(r["Valor Profissional"]||r["Repasse Profissional"]||0);
   const mes=toYYYYMM(data);
@@ -804,11 +802,11 @@ function processData(silent){
     const crM=cr.filter(r=>r.mes===mes),cpM=cp.filter(r=>r.mes===mes),atM=atRows.filter(r=>r.mes===mes);
 
     // ── RECEITA BRUTA: EXCLUSIVAMENTE do Excel (regime competência) ──
-    // rb_excel = coluna "Valor" (bruto, antes de qualquer desconto)
-    // desc_excel = coluna "Desconto" (descontos concedidos)
-    // rl = coluna "Valor a Receber" = Valor - Desconto (receita bruta líquida de descontos)
-    const rb_excel=atM.reduce((a,r)=>a+r.rb,0);      // Receita Bruta (coluna Valor)
-    const desc_excel=atM.reduce((a,r)=>a+(r.rb-r.rl),0); // Descontos Concedidos
+    // rb_excel = coluna "Valor a Receber" (col. I) = FATURAMENTO — decisão do cliente
+    // desc_excel = 0: o Desconto não é trazido para a DRE (Valor a Receber já é líquido dele)
+    // Calculado a partir de r.rl para valer também nos dados já gravados no servidor.
+    const rb_excel=atM.reduce((a,r)=>a+r.rl,0);      // Receita Bruta = Valor a Receber
+    const desc_excel=0;                              // sem linha de desconto
     const rl=atM.reduce((a,r)=>a+r.rl,0);              // Receita Bruta Líq. (Valor a Receber)
     const hasExcel=atM.length>0;
 
