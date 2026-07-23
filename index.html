@@ -1378,6 +1378,60 @@ window.setUnit=function(u){
 
 // ── CHARTS ──
 function barH(data,w,rh,lw){w=w||480;rh=rh||24;lw=lw||170;const mx=Math.max(...data.map(d=>Math.abs(d.v||0)))||1,bmax=w-lw-80,h=data.length*rh+6;let s=`<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">`;data.forEach((d,i)=>{const bw=Math.max(2,Math.abs(d.v||0)/mx*bmax),y=i*rh+2;s+=`<text x="${lw-5}" y="${y+rh/2+4}" text-anchor="end" font-size="10" fill="#8b6b5a" font-family="sans-serif">${d.l.length>24?d.l.slice(0,24)+"…":d.l}</text><rect x="${lw}" y="${y+3}" width="${bw}" height="${rh-7}" rx="3" fill="${d.c}" opacity=".9"/><text x="${lw+bw+5}" y="${y+rh/2+4}" font-size="10" fill="#2d1f17" font-family="'Courier New',monospace">${fR(Math.abs(d.v||0))}</text>`});return s+"</svg>"}
+// ── Gráfico de fluxo de caixa: barras (movimento do período) + linha (saldo acumulado) ──
+// Tooltip no hover mostra recebimentos, pagamentos e saldo. Usado no diário e no mensal.
+let FC_TIPD=[];
+function fcGrafico(items,opt){
+  opt=opt||{};
+  if(!items||!items.length)return '<div style="color:var(--muted);text-align:center;padding:20px">Sem dados</div>';
+  FC_TIPD=items.map(x=>({lb:x.lb,e:x.e||0,s:x.s||0,sm:(x.e||0)-(x.s||0),ac:x.ac||0}));
+  const W=1000,H=opt.h||270,padL=64,padR=16,padT=16,padB=28;
+  const n=items.length,iw=W-padL-padR,ih=H-padT-padB,step=iw/n;
+  const bw=Math.max(3,Math.min(26,step*0.5));
+  const vals=[0];items.forEach(x=>{vals.push(x.ac||0,(x.e||0)-(x.s||0));});
+  let mx=Math.max.apply(null,vals),mn=Math.min.apply(null,vals);
+  if(mx===mn){mx+=1;mn-=1;}
+  const folga=(mx-mn)*0.12;mx+=folga;mn-=folga;
+  const y=v=>padT+ih-((v-mn)/(mx-mn))*ih, x=i=>padL+step*(i+0.5);
+  const kf=v=>{const a=Math.abs(v);return a>=1000?Math.round(v/1000)+"k":String(Math.round(v));};
+  let grid="";
+  for(let i=0;i<=5;i++){const t=mn+(mx-mn)*i/5,yy=y(t);
+    grid+=`<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="var(--border)" stroke-width="1" stroke-dasharray="3 4"/>`+
+          `<text x="${padL-8}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)">${kf(t)}</text>`;}
+  const y0=y(0);
+  grid+=`<line x1="${padL}" y1="${y0}" x2="${W-padR}" y2="${y0}" stroke="var(--muted)" stroke-width="1.2"/>`;
+  let bars="";
+  items.forEach((d,i)=>{const sm=(d.e||0)-(d.s||0);if(!sm)return;
+    const yy=y(sm),top=Math.min(yy,y0),h=Math.max(1,Math.abs(yy-y0));
+    bars+=`<rect x="${(x(i)-bw/2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${sm>=0?"#43b581":"#ef4c62"}" opacity=".88"/>`;});
+  const pts=items.map((d,i)=>x(i).toFixed(1)+","+y(d.ac||0).toFixed(1)).join(" ");
+  const linha=`<polyline points="${pts}" fill="none" stroke="#40587a" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>`;
+  let dots="";items.forEach((d,i)=>{dots+=`<circle cx="${x(i).toFixed(1)}" cy="${y(d.ac||0).toFixed(1)}" r="2.7" fill="#40587a"/>`;});
+  let xl="";items.forEach((d,i)=>{if(n<=16||i%Math.ceil(n/16)===0)xl+=`<text x="${x(i).toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${d.xl||d.lb}</text>`;});
+  let hov="";items.forEach((d,i)=>{hov+=`<rect x="${(padL+step*i).toFixed(1)}" y="${padT}" width="${step.toFixed(1)}" height="${ih}" fill="transparent" style="cursor:crosshair" onmousemove="fcTip(event,${i})" onmouseleave="fcTipOff()"/>`;});
+  return `<div class="fcg-wrap" style="position:relative;width:100%">
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" xmlns="http://www.w3.org/2000/svg">${grid}${bars}${linha}${dots}${xl}${hov}</svg>
+    <div id="fcg-tip" style="display:none;position:absolute;pointer-events:none;background:#2f6fd0;color:#fff;border-radius:9px;padding:9px 13px;font-size:11.5px;line-height:1.6;box-shadow:0 6px 20px rgba(0,0,0,.24);z-index:20;white-space:nowrap"></div>
+  </div>`;
+}
+window.fcTip=function(ev,i){
+  const d=FC_TIPD[i];if(!d)return;
+  const tip=document.getElementById("fcg-tip");if(!tip)return;
+  const wrap=tip.parentNode;if(!wrap)return;
+  tip.innerHTML=`<div style="font-weight:700;margin-bottom:4px">${d.lb}</div>`+
+    `<div>Recebimentos: <b>${fR(d.e)}</b></div>`+
+    `<div>Pagamentos: <b>${d.s?fR(-d.s):fR(0)}</b></div>`+
+    `<div>Saldo do período: <b>${fR(d.sm)}</b></div>`+
+    `<div style="margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,.35)">Saldo acumulado: <b>${fR(d.ac)}</b></div>`;
+  tip.style.display="block";
+  const r=wrap.getBoundingClientRect(),tw=tip.offsetWidth||200,th=tip.offsetHeight||96;
+  let left=ev.clientX-r.left+16,top=ev.clientY-r.top-th/2;
+  if(left+tw>r.width)left=ev.clientX-r.left-tw-16;
+  if(left<0)left=0;
+  if(top<0)top=0; if(top+th>r.height)top=Math.max(0,r.height-th);
+  tip.style.left=left+"px";tip.style.top=top+"px";
+};
+window.fcTipOff=function(){const t=document.getElementById("fcg-tip");if(t)t.style.display="none";};
 function barG(lbls,series,W,H){W=W||720;H=H||260;if(!lbls||!lbls.length)return"<div style='color:var(--muted);text-align:center;padding:20px'>Sem dados</div>";const pL=62,pR=16,pT=14,pB=52,cW=W-pL-pR,cH=H-pT-pB,n=Math.max(1,lbls.length),ns=Math.max(1,series.length);const allVals=series.flatMap(s=>s.v.map(v=>Math.abs(v||0)));const mx=Math.max(1,...allVals)*1.12||1;const bw=Math.min(22,(cW/n-6)/ns),gap=cW/n;let s=`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">`;for(let g=0;g<=4;g++){const yy=pT+cH-g*(cH/4);s+=`<line x1="${pL}" y1="${yy}" x2="${pL+cW}" y2="${yy}" stroke="#f0e4dc" stroke-width="1"/><text x="${pL-3}" y="${yy+4}" text-anchor="end" font-size="9" fill="#c9b5aa" font-family="sans-serif">${fR(mx*g/4)}</text>`}series.forEach((sr,si)=>{sr.v.forEach((v,i)=>{const bh=Math.abs(v)/mx*cH,x=pL+i*gap+(si*bw)+(gap-ns*bw)/2;s+=`<rect x="${x}" y="${pT+cH-bh}" width="${bw-2}" height="${Math.max(bh,1)}" rx="2" fill="${Array.isArray(sr.c)?sr.c[i]||'var(--brand)':sr.c||'var(--brand)'}" opacity=".9"/>`})});lbls.forEach((l,i)=>{s+=`<text x="${pL+i*gap+gap/2}" y="${pT+cH+13}" text-anchor="middle" font-size="9" fill="#8b6b5a" font-family="sans-serif">${l}</text>`});series.forEach((sr,i)=>{const lx=pL+i*110;s+=`<rect x="${lx}" y="${pT+cH+26}" width="9" height="9" rx="2" fill="${sr.c}" opacity=".9"/><text x="${lx+13}" y="${pT+cH+34}" font-size="10" fill="#8b6b5a" font-family="sans-serif">${sr.nm}</text>`});return s+"</svg>"}
 // Sparkline minigráfico inline para DRE
 function sparkline(vals, color, w, h){
@@ -2513,8 +2567,9 @@ function renderFluxoDiario(){
   }
   const alerta=diaFuro?`<div class="warn-box" style="margin-bottom:10px">⚠️ <b>Alerta de caixa:</b> o saldo fica negativo no dia <b>${diaFuro.dia}/${mes.slice(5)}</b> (${fR(diaFuro.ac)})${modo==="projetado"?" no cenário projetado (real + contas em aberto)":" considerando o cenário <b>"+(modo==="previsto"?"previsto":"realizado")+"</b>"}.</div>`:"";
   // Gráfico do saldo acumulado
-  const graf=`<div class="panel"><div class="pt">Saldo acumulado dia a dia <span class="pt-badge">${monthLabel(mes)}</span></div>
-    <div class="cwrap">${barG(base.dias.map(x=>String(x.dia)),[{nm:"Saldo",v:base.dias.map(x=>x.ac),c:base.dias.map(x=>x.ac>=0?"var(--green)":"var(--red)")}],760,180)}</div></div>`;
+  const graf=`<div class="panel"><div class="pt">Fluxo de caixa diário <span class="pt-badge">${monthLabel(mes)}</span>
+      <span style="float:right;font-size:10px;color:var(--muted);font-weight:400">▮ movimento do dia · ━ saldo acumulado · passe o mouse para ver o detalhe</span></div>
+    ${fcGrafico(base.dias.map(x=>({lb:x.d.slice(8)+"/"+x.d.slice(5,7)+"/"+x.d.slice(2,4),xl:String(x.dia),e:x.e,s:x.s,ac:x.ac})),{h:270})}</div>`;
   // Tabela
   const dn=["dom","seg","ter","qua","qui","sex","sáb"];
   let head,body="";
@@ -2633,10 +2688,10 @@ function renderFluxo(){
     ${kCard("Saldo Acumulado",fR(fc[fc.length-1]?.ac||0),"","var(--blue)","Inc. saldo inicial Dez/25")}
     ${proj.length?kCard("Próx. 6 meses (proj.)",fR(proj.reduce((a,r)=>a+(r.e-r.s),0)),"","var(--muted)","Média últimos 3 meses"):""}
   </div>
-  <div class="panel"><div class="pt">Entradas vs Saídas <span class="pt-badge">Vencimento · Projeção 6 meses</span></div>
-  <div class="cwrap">${barG(fc.map(r=>r.m),[{nm:"Entradas",v:fc.map(r=>r.e),c:"var(--green)"},{nm:"Saídas",v:fc.map(r=>r.s),c:"var(--red)"}],760)}</div></div>
-  <div class="panel"><div class="pt">Saldo Acumulado</div>
-  <div class="cwrap">${barG(fc.map(r=>r.m),[{nm:"Saldo",v:fc.map(r=>r.ac),c:fc.map(r=>r.ac>=0?"var(--green)":"var(--red)")}],760,180)}</div></div>
+  <div class="panel"><div class="pt">Fluxo de caixa mensal <span class="pt-badge">${FC_MODE==="realizado"?"Regime caixa":"Vencimento · Projeção 6 meses"}</span>
+      <span style="float:right;font-size:10px;color:var(--muted);font-weight:400">▮ movimento do mês · ━ saldo acumulado · passe o mouse para ver o detalhe</span></div>
+  ${fcGrafico(fc.map(r=>({lb:r.m,xl:r.m,e:r.e,s:r.s,ac:r.ac})),{h:280})}</div>
+
   <div class="src-info">💰 ${FC_MODE==="realizado"?"✅ Realizado: regime caixa — só o que entrou/saiu do banco (extrato manda na data)"+concInfo():FC_MODE==="previsto"?"📋 Previsto: datas de vencimento · total do lançamento · Conta Azul":"📊 Realizado + Previsto"} · Saldo inicial: ${fR(saldoInicialUnidade())}</div>
   <div class="panel"><div class="pt">Detalhamento — ${FC_MODE==="realizado"?"✅ Realizado (valores quitados/recebidos)":FC_MODE==="previsto"?"📋 Previsto (datas de vencimento)":"📊 Realizado"}</div>
   <div class="tw"><table style="width:100%;min-width:800px"><thead><tr>
