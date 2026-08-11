@@ -2997,7 +2997,7 @@ function fcRenderCtrlMensal(){
   const rows=cmp.map(c=>`<tr><td class="b">${c.m}</td>${cel(c.eReal,c.ePrev,"entrada")}${cel(c.sReal,c.sPrev,"saida")}${cel(c.resReal,c.resPrev,"resultado")}${cel(c.acReal,c.acPrev,"saldo")}</tr>`).join("");
   const tabela=`<div class="panel"><div class="pt">Comparativo mensal — previsto × realizado</div>
     <div class="tw"><table style="width:100%;min-width:900px"><thead>
-    <tr><th rowspan="2">Mês</th><th colspan="3" class="r" style="background:rgba(34,197,94,.08)">Entradas</th><th colspan="3" class="r" style="background:rgba(220,38,38,.06)">Saídas</th><th colspan="3" class="r" style="background:rgba(37,99,235,.06)">Resultado</th><th colspan="3" class="r" style="background:rgba(196,98,45,.06)">Saldo acumulado</th></tr>
+    <tr><th rowspan="2">Mês</th><th colspan="3" style="text-align:center;background:rgba(34,197,94,.10);border-left:2px solid var(--border)">Entradas</th><th colspan="3" style="text-align:center;background:rgba(220,38,38,.08);border-left:2px solid var(--border)">Saídas</th><th colspan="3" style="text-align:center;background:rgba(37,99,235,.08);border-left:2px solid var(--border)">Resultado</th><th colspan="3" style="text-align:center;background:rgba(196,98,45,.08);border-left:2px solid var(--border)">Saldo acumulado</th></tr>
     <tr>${"<th class='r' style='font-size:9px'>Prev</th><th class='r' style='font-size:9px'>Real</th><th class='r' style='font-size:9px'>Desvio</th>".repeat(4)}</tr>
     </thead><tbody>${rows}</tbody></table></div>
     <div style="font-size:10px;color:var(--muted);padding-top:6px">Verde = favorável · vermelho = desfavorável (entradas: menos é ruim; saídas: menos é bom).</div></div>`;
@@ -3045,7 +3045,7 @@ function fcRenderCtrlDiario(){
     ${dcell(d.eReal,d.ePrev,"entrada")}${dcell(d.sReal,d.sPrev,"saida")}${dcell(d.acReal,d.acPrev,"saldo")}</tr>`).join("");
   const tabela=`<div class="panel"><div class="pt">Comparativo diário — previsto × realizado</div>
     <div class="tw"><table style="width:100%;min-width:820px"><thead>
-    <tr><th rowspan="2">Data</th><th colspan="3" class="r" style="background:rgba(34,197,94,.08)">Entradas</th><th colspan="3" class="r" style="background:rgba(220,38,38,.06)">Saídas</th><th colspan="3" class="r" style="background:rgba(37,99,235,.06)">Saldo</th></tr>
+    <tr><th rowspan="2">Data</th><th colspan="3" style="text-align:center;background:rgba(34,197,94,.10);border-left:2px solid var(--border)">Entradas</th><th colspan="3" style="text-align:center;background:rgba(220,38,38,.08);border-left:2px solid var(--border)">Saídas</th><th colspan="3" style="text-align:center;background:rgba(37,99,235,.08);border-left:2px solid var(--border)">Saldo</th></tr>
     <tr>${"<th class='r' style='font-size:9px'>Prev</th><th class='r' style='font-size:9px'>Real</th><th class='r' style='font-size:9px'>Desvio</th>".repeat(3)}</tr>
     </thead><tbody>${trs}</tbody></table></div>
     <div style="font-size:10px;color:var(--muted);padding-top:6px">● dia com realizado · ○ só previsto (ainda não ocorreu) · "—" em realizado = sem realizado (não é R$ 0).</div></div>`;
