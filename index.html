@@ -2789,43 +2789,335 @@ function fcProximosDias(){
 }
 
 // ── Dispatcher ──
+// ══════════════════════════════════════════════════════════════════════════
+//  CONTROLADORIA — Realizado × Previsto (camada de apresentação)
+//  Deriva TUDO das funções-fonte (fcDiarioFonteReal/Prev/Proj, buildRangeDias,
+//  APP.fcData, APP.fcDataPrevisto). Nenhuma fórmula financeira nova.
+//  Conceitos (mantidos separados): PREVISTO = plano por vencimento ·
+//  REALIZADO = o que ocorreu · "sem realizado" ≠ R$ 0.
+// ══════════════════════════════════════════════════════════════════════════
+let FC_TAB = "caixa";        // "caixa" | "controladoria"
+
+// Motor de comparação DIÁRIA no intervalo [ini,fim]
+function fcDailyCompare(ini,fim){
+  const hoje=new Date().toISOString().slice(0,10);
+  const real=fcDiarioFonteReal(), prev=fcDiarioFontePrev(), proj=fcDiarioFonteProj();
+  const corte=(proj.corte&&proj.corte<=hoje)?proj.corte:hoje;
+  const dR=buildRangeDias(ini,fim,real);
+  const dP=buildRangeDias(ini,fim,prev);
+  const dias=dR.dias.map((r,i)=>{
+    const p=dP.dias[i], temReal=r.d<=corte;
+    return {d:r.d,dia:r.dia,dow:r.dow,
+      ePrev:p.e, sPrev:p.s, acPrev:p.ac,
+      eReal:temReal?r.e:null, sReal:temReal?r.s:null, acReal:temReal?r.ac:null,
+      temReal};
+  });
+  return {dias,corte,ini,fim};
+}
+
+// Motor de comparação MENSAL (usa APP.fcData × APP.fcDataPrevisto — inalterados)
+function fcMonthlyCompare(meses){
+  const R=APP.fcData||[], P=APP.fcDataPrevisto||[];
+  return meses.map(m=>{
+    const r=R.find(x=>x.mes===m), p=P.find(x=>x.mes===m);
+    return {mes:m, m:monthLabel(m),
+      ePrev:p?p.e:null, eReal:r?r.e:null,
+      sPrev:p?p.s:null, sReal:r?r.s:null,
+      resPrev:p?(p.e-p.s):null, resReal:r?(r.e-r.s):null,
+      acPrev:p?p.ac:null, acReal:r?r.ac:null};
+  });
+}
+
+// Desvio com natureza (entradas: menos=ruim; saídas: menos=bom; resultado/saldo: mais=bom)
+function fcDesvio(real,prev,natureza){
+  if(real==null||prev==null)return {dif:null,pct:null,good:null};
+  const dif=real-prev, pct=prev!==0?dif/Math.abs(prev):null;
+  let good; if(natureza==="saida")good=dif<=0; else good=dif>=0; // entrada/resultado/saldo
+  return {dif,pct,good};
+}
+
+// ── Gráfico de DUAS LINHAS: saldo realizado × saldo previsto, divisor HOJE ──
+let FC_TIPC=[];
+function fcGraficoComp(items,cutIndex){
+  if(!items||!items.length)return '<div class="no-data">Sem dados no período.</div>';
+  FC_TIPC=items.slice();
+  const W=1000,H=300,padL=64,padR=16,padT=22,padB=30;
+  const n=items.length,iw=W-padL-padR,ih=H-padT-padB,step=iw/n;
+  const vals=[]; items.forEach(x=>{if(x.acPrev!=null)vals.push(x.acPrev);if(x.acReal!=null)vals.push(x.acReal);});
+  vals.push(0);
+  let mx=Math.max.apply(null,vals),mn=Math.min.apply(null,vals);
+  if(mx===mn){mx+=1;mn-=1;} const folga=(mx-mn)*0.12; mx+=folga; mn-=folga;
+  const y=v=>padT+ih-((v-mn)/(mx-mn))*ih, x=i=>padL+step*(i+0.5);
+  const kf=v=>{const a=Math.abs(v);return a>=1000?Math.round(v/1000)+"k":String(Math.round(v));};
+  let grid="";
+  for(let i=0;i<=5;i++){const t=mn+(mx-mn)*i/5,yy=y(t);
+    grid+=`<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="var(--border)" stroke-width="1" stroke-dasharray="3 4"/>`+
+          `<text x="${padL-8}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)">${kf(t)}</text>`;}
+  grid+=`<line x1="${padL}" y1="${y(0)}" x2="${W-padR}" y2="${y(0)}" stroke="var(--muted)" stroke-width="1.1"/>`;
+  // linha PREVISTO (laranja tracejada) — todo o período
+  const ptsP=items.map((d,i)=>x(i).toFixed(1)+","+y(d.acPrev||0).toFixed(1)).join(" ");
+  const lineP=`<polyline points="${ptsP}" fill="none" stroke="#C4622D" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>`;
+  // linha REALIZADO (azul sólida) — só onde há realizado
+  const ptsR=items.filter(d=>d.acReal!=null).map(d=>{const i=items.indexOf(d);return x(i).toFixed(1)+","+y(d.acReal).toFixed(1);}).join(" ");
+  const lineR=ptsR?`<polyline points="${ptsR}" fill="none" stroke="#2563eb" stroke-width="2.4" stroke-linejoin="round"/>`:"";
+  let dots=""; items.forEach((d,i)=>{ if(d.acReal!=null)dots+=`<circle cx="${x(i).toFixed(1)}" cy="${y(d.acReal).toFixed(1)}" r="2.4" fill="#2563eb"/>`; });
+  // divisor HOJE
+  let hoje="";
+  if(cutIndex!=null&&cutIndex>=0&&cutIndex<n){
+    const hx=(padL+step*(cutIndex+1)).toFixed(1);
+    hoje=`<line x1="${hx}" y1="${padT-4}" x2="${hx}" y2="${padT+ih}" stroke="var(--brand)" stroke-width="1.3" stroke-dasharray="4 3"/>`+
+         `<text x="${hx}" y="${padT-8}" text-anchor="middle" font-size="10" font-weight="700" fill="var(--brand)">HOJE</text>`;
+  }
+  let xl=""; items.forEach((d,i)=>{ if(n<=16||i%Math.ceil(n/16)===0) xl+=`<text x="${x(i).toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${d.xl||d.lb}</text>`;});
+  let hov=""; items.forEach((d,i)=>{hov+=`<rect x="${(padL+step*i).toFixed(1)}" y="${padT}" width="${step.toFixed(1)}" height="${ih}" fill="transparent" style="cursor:crosshair" onmousemove="fcTipC(event,${i})" onmouseleave="fcTipCOff()"/>`;});
+  const legend=`<div style="display:flex;gap:16px;font-size:10px;color:var(--muted);padding:2px 0 6px 64px">
+    <span><span style="display:inline-block;width:14px;height:2px;background:#2563eb;vertical-align:middle"></span> Realizado</span>
+    <span><span style="display:inline-block;width:14px;border-top:2px dashed #C4622D;vertical-align:middle"></span> Previsto</span></div>`;
+  return `<div class="fcg-wrap" style="position:relative;width:100%">${legend}
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" xmlns="http://www.w3.org/2000/svg">${grid}${lineP}${lineR}${dots}${hoje}${xl}${hov}</svg>
+    <div id="fcgc-tip" style="display:none;position:absolute;pointer-events:none;background:#2f3b4d;color:#fff;border-radius:9px;padding:9px 13px;font-size:11px;line-height:1.6;box-shadow:0 6px 20px rgba(0,0,0,.24);z-index:20;white-space:nowrap"></div>
+  </div>`;
+}
+window.fcTipC=function(ev,i){
+  const d=FC_TIPC[i]; const tip=document.getElementById("fcgc-tip"); if(!d||!tip)return;
+  const wrap=tip.parentNode; if(!wrap)return;
+  const dv=d.acReal!=null?d.acReal-(d.acPrev||0):null;
+  tip.innerHTML=`<div style="font-weight:700;margin-bottom:3px">${d.lb}</div>`+
+    `<div>Saldo previsto: <b>${fR(d.acPrev)}</b></div>`+
+    `<div>Saldo realizado: <b>${d.acReal!=null?fR(d.acReal):'<span style="opacity:.7">sem realizado</span>'}</b></div>`+
+    (dv!=null?`<div>Desvio: <b style="color:${dv>=0?'#7ee2a8':'#f6a5a0'}">${(dv>0?'+':'')+fR(dv)}</b></div>`:"")+
+    `<div style="margin-top:3px;padding-top:3px;border-top:1px solid rgba(255,255,255,.3);font-size:10px;opacity:.9">`+
+    `Entradas P/R: ${fR(d.ePrev)} / ${d.eReal!=null?fR(d.eReal):"—"}<br>`+
+    `Saídas P/R: ${fR(d.sPrev)} / ${d.sReal!=null?fR(d.sReal):"—"}</div>`;
+  tip.style.display="block";
+  const r=wrap.getBoundingClientRect(),tw=tip.offsetWidth||200,th=tip.offsetHeight||110;
+  let left=ev.clientX-r.left+16,top=ev.clientY-r.top-th/2;
+  if(left+tw>r.width)left=ev.clientX-r.left-tw-16; if(left<0)left=0;
+  if(top<0)top=0; if(top+th>r.height)top=Math.max(0,r.height-th);
+  tip.style.left=left+"px";tip.style.top=top+"px";
+};
+window.fcTipCOff=function(){const t=document.getElementById("fcgc-tip");if(t)t.style.display="none";};
+
+// ── Gráfico de BARRAS AGRUPADAS: previsto × realizado por categoria ──
+function fcBarrasComp(cats){
+  // cats: [{lb, prev, real}]
+  if(!cats.length)return '<div class="no-data">Sem dados.</div>';
+  const W=1000,H=240,padL=64,padR=16,padT=16,padB=34;
+  const n=cats.length,iw=W-padL-padR,ih=H-padT-padB,group=iw/n,bw=Math.min(30,group*0.32);
+  const vals=[0]; cats.forEach(c=>{vals.push(c.prev||0,c.real||0);});
+  let mx=Math.max.apply(null,vals),mn=Math.min.apply(null,vals); if(mx===mn)mx+=1; if(mn>0)mn=0;
+  const folga=(mx-mn)*0.1; mx+=folga;
+  const y=v=>padT+ih-((v-mn)/(mx-mn))*ih, cx=i=>padL+group*(i+0.5);
+  const kf=v=>{const a=Math.abs(v);return a>=1000?Math.round(v/1000)+"k":String(Math.round(v));};
+  const y0=y(0); let grid="";
+  for(let i=0;i<=4;i++){const t=mn+(mx-mn)*i/4,yy=y(t);grid+=`<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="var(--border)" stroke-dasharray="3 4"/><text x="${padL-8}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)">${kf(t)}</text>`;}
+  let bars="",xl="";
+  cats.forEach((c,i)=>{
+    const xp=cx(i)-bw-2, xr=cx(i)+2;
+    const yp=y(c.prev||0), yr=y(c.real||0);
+    bars+=`<rect x="${xp.toFixed(1)}" y="${Math.min(yp,y0).toFixed(1)}" width="${bw}" height="${Math.max(1,Math.abs(yp-y0)).toFixed(1)}" rx="2" fill="#C4622D" opacity="0.55"/>`;
+    bars+=`<rect x="${xr.toFixed(1)}" y="${Math.min(yr,y0).toFixed(1)}" width="${bw}" height="${Math.max(1,Math.abs(yr-y0)).toFixed(1)}" rx="2" fill="#2563eb" opacity="0.85"/>`;
+    xl+=`<text x="${cx(i).toFixed(1)}" y="${H-16}" text-anchor="middle" font-size="10" fill="var(--text)">${c.lb}</text>`;
+  });
+  const legend=`<div style="display:flex;gap:16px;font-size:10px;color:var(--muted);padding:0 0 4px 64px">
+    <span><span style="display:inline-block;width:11px;height:11px;background:#C4622D;opacity:.55;border-radius:2px;vertical-align:middle"></span> Previsto</span>
+    <span><span style="display:inline-block;width:11px;height:11px;background:#2563eb;border-radius:2px;vertical-align:middle"></span> Realizado</span></div>`;
+  return `${legend}<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" xmlns="http://www.w3.org/2000/svg">${grid}<line x1="${padL}" y1="${y0}" x2="${W-padR}" y2="${y0}" stroke="var(--muted)"/>${bars}${xl}</svg>`;
+}
+
+// ── Leitura gerencial: insights calculados dos dados ──
+function fcLeituraGerencial(cmp){
+  const dias=cmp.dias.filter(d=>d.temReal);
+  if(!dias.length)return "";
+  const totEP=cmp.dias.reduce((a,d)=>a+d.ePrev,0), totER=dias.reduce((a,d)=>a+d.eReal,0);
+  const totSP=cmp.dias.reduce((a,d)=>a+d.sPrev,0), totSR=dias.reduce((a,d)=>a+d.sReal,0);
+  const ult=dias[dias.length-1];
+  const desvioSaldo=ult.acReal-ult.acPrev;
+  const ins=[];
+  const seta=v=>v>=0?"▲":"▼";
+  if(Math.abs(desvioSaldo)>=1){
+    ins.push(`O saldo realizado está <b style="color:${desvioSaldo>=0?"var(--green)":"var(--red)"}">${fR(Math.abs(desvioSaldo))} ${desvioSaldo>=0?"acima":"abaixo"}</b> da projeção.`);
+  } else ins.push(`O saldo realizado está <b>em linha</b> com a projeção.`);
+  // entradas (só compara dias com realizado)
+  const epR=dias.reduce((a,d)=>a+d.ePrev,0);
+  if(epR>0){const pe=(totER-epR)/epR; ins.push(`As entradas realizadas estão <b style="color:${pe>=0?"var(--green)":"var(--red)"}">${Math.abs(pe*100).toFixed(0)}% ${pe>=0?"acima":"abaixo"}</b> do previsto no período com realização.`);}
+  const spR=dias.reduce((a,d)=>a+d.sPrev,0);
+  if(spR>0){const ps=(totSR-spR)/spR; ins.push(`As saídas realizadas estão <b style="color:${ps<=0?"var(--green)":"var(--red)"}">${Math.abs(ps*100).toFixed(0)}% ${ps<=0?"abaixo":"acima"}</b> do previsto.`);}
+  // maior desvio de saldo
+  let pior=null,piorV=0; dias.forEach(d=>{const dv=Math.abs(d.acReal-d.acPrev); if(dv>piorV){piorV=dv;pior=d;}});
+  if(pior&&piorV>=1)ins.push(`O principal desvio de saldo ocorreu em <b>${pior.d.slice(8)}/${pior.d.slice(5,7)}</b> (${fR(pior.acReal-pior.acPrev)}).`);
+  return `<div class="panel"><div class="pt">Leitura gerencial</div>
+    <ul style="margin:4px 0 0;padding-left:18px;font-size:12.5px;line-height:1.9">${ins.map(t=>`<li>${t}</li>`).join("")}</ul></div>`;
+}
+
+// Cards comparativos (previsto × realizado) com natureza de desvio
+function fcCardComp(titulo,prev,real,natureza){
+  const dv=fcDesvio(real,prev,natureza);
+  const cor=dv.good==null?"var(--muted)":dv.good?"var(--green)":"var(--red)";
+  return `<div class="card" style="border-top-color:${cor};flex:1 1 160px;min-width:150px">
+    <div class="cl">${titulo}</div>
+    <div style="display:flex;gap:10px;align-items:baseline"><div><div style="font-size:9px;color:var(--muted)">Prev.</div><div class="mn" style="font-size:14px">${fRk(prev)}</div></div>
+    <div><div style="font-size:9px;color:var(--muted)">Real.</div><div class="mn" style="font-size:16px;font-weight:700">${real!=null?fRk(real):'<span style="color:var(--muted)">—</span>'}</div></div></div>
+    <div class="cs" style="color:${cor};font-weight:600">${dv.dif!=null?(dv.dif>0?"+":"")+fR(dv.dif)+(dv.pct!=null?" ("+(dv.pct>0?"+":"")+(dv.pct*100).toFixed(0)+"%)":""):"sem realizado"}</div></div>`;
+}
+
+// ── CONTROLADORIA — MENSAL ──
+function fcRenderCtrlMensal(){
+  let meses=(APP.mesesVisiveis||[]).slice();
+  if(CUR_MES!=="TOTAL"&&!dtFrom&&!dtTo)meses=meses.filter(m=>m===CUR_MES);
+  else if(dtFrom||dtTo)meses=meses.filter(m=>(!dtFrom||m>=dtFrom)&&(!dtTo||m<=dtTo));
+  if(!meses.length)meses=(APP.mesesVisiveis||[]).slice();
+  const cmp=fcMonthlyCompare(meses);
+  const som=(k)=>cmp.reduce((a,c)=>a+(c[k]||0),0);
+  const somR=(k)=>cmp.reduce((a,c)=>a+(c[k]!=null?c[k]:0),0);
+  const cards=`<div class="cards" style="align-items:stretch">
+    ${fcCardComp("Entradas",som("ePrev"),somR("eReal"),"entrada")}
+    ${fcCardComp("Saídas",som("sPrev"),somR("sReal"),"saida")}
+    ${fcCardComp("Resultado",som("resPrev"),somR("resReal"),"resultado")}
+  </div>`;
+  const chartE=fcBarrasComp(cmp.map(c=>({lb:c.m.replace("/26",""),prev:c.ePrev,real:c.eReal})));
+  const chartS=fcBarrasComp(cmp.map(c=>({lb:c.m.replace("/26",""),prev:c.sPrev,real:c.sReal})));
+  const chartR=fcBarrasComp(cmp.map(c=>({lb:c.m.replace("/26",""),prev:c.resPrev,real:c.resReal})));
+  const graf=`<div class="panel"><div class="pt">Entradas — previsto × realizado</div>${chartE}</div>
+    <div class="panel"><div class="pt">Saídas — previsto × realizado</div>${chartS}</div>
+    <div class="panel"><div class="pt">Resultado — previsto × realizado</div>${chartR}</div>`;
+  const cel=(real,prev,nat)=>{const d=fcDesvio(real,prev,nat);const c=d.good==null?"var(--muted)":d.good?"var(--green)":"var(--red)";
+    return `<td class="r mn" style="color:var(--muted)">${prev!=null?fRk(prev):"—"}</td><td class="r mn">${real!=null?fRk(real):'<span style="color:var(--muted)">sem real.</span>'}</td><td class="r mn" style="color:${c}">${d.dif!=null?(d.dif>0?"+":"")+fRk(d.dif):"—"}</td>`;};
+  const rows=cmp.map(c=>`<tr><td class="b">${c.m}</td>${cel(c.eReal,c.ePrev,"entrada")}${cel(c.sReal,c.sPrev,"saida")}${cel(c.resReal,c.resPrev,"resultado")}${cel(c.acReal,c.acPrev,"saldo")}</tr>`).join("");
+  const tabela=`<div class="panel"><div class="pt">Comparativo mensal — previsto × realizado</div>
+    <div class="tw"><table style="width:100%;min-width:900px"><thead>
+    <tr><th rowspan="2">Mês</th><th colspan="3" class="r" style="background:rgba(34,197,94,.08)">Entradas</th><th colspan="3" class="r" style="background:rgba(220,38,38,.06)">Saídas</th><th colspan="3" class="r" style="background:rgba(37,99,235,.06)">Resultado</th><th colspan="3" class="r" style="background:rgba(196,98,45,.06)">Saldo acumulado</th></tr>
+    <tr>${"<th class='r' style='font-size:9px'>Prev</th><th class='r' style='font-size:9px'>Real</th><th class='r' style='font-size:9px'>Desvio</th>".repeat(4)}</tr>
+    </thead><tbody>${rows}</tbody></table></div>
+    <div style="font-size:10px;color:var(--muted);padding-top:6px">Verde = favorável · vermelho = desfavorável (entradas: menos é ruim; saídas: menos é bom).</div></div>`;
+  return cards+graf+tabela;
+}
+
+// ── CONTROLADORIA — DIÁRIO ──
+function fcRenderCtrlDiario(){
+  const mesRef=fcMesRef();
+  const [y,mo]=mesRef.split("-").map(Number);
+  const ini=mesRef+"-01", fim=mesRef+"-"+String(new Date(y,mo,0).getDate()).padStart(2,"0");
+  const cmp=fcDailyCompare(ini,fim);
+  let cutIdx=-1; cmp.dias.forEach((d,i)=>{if(d.temReal)cutIdx=i;});
+  const comReal=cmp.dias.filter(d=>d.temReal);
+  const ult=comReal[comReal.length-1];
+  const saldoReal=ult?ult.acReal:null, saldoPrev=ult?ult.acPrev:(cmp.dias[0]?cmp.dias[0].acPrev:null);
+  const desvio=(saldoReal!=null&&saldoPrev!=null)?saldoReal-saldoPrev:null;
+  const totEP=comReal.reduce((a,d)=>a+d.ePrev,0), totER=comReal.reduce((a,d)=>a+d.eReal,0);
+  const totSP=comReal.reduce((a,d)=>a+d.sPrev,0), totSR=comReal.reduce((a,d)=>a+d.sReal,0);
+  const periodo=ult?(_ddmmaa(ini)+" a "+_ddmmaa(ult.d)):(_ddmmaa(ini)+" a "+_ddmmaa(fim));
+  // cards
+  const cardBig=(lbl,val,cor,sub)=>`<div class="card" style="border-top-color:${cor};flex:1.2 1 160px;min-width:150px"><div class="cl">${lbl}</div><div class="cv" style="color:${cor}">${val}</div><div class="cs">${sub}</div></div>`;
+  const cards=`<div class="cards" style="align-items:stretch">
+    ${cardBig("Saldo realizado",saldoReal!=null?fRk(saldoReal):'<span style="color:var(--muted);font-size:16px">sem realizado</span>',"var(--blue)","Até "+(ult?_ddmm(ult.d):"—"))}
+    ${cardBig("Saldo previsto",fRk(saldoPrev),"var(--gold)","No mesmo dia")}
+    ${cardBig("Desvio de saldo",desvio!=null?((desvio>0?"+":"")+fRk(desvio).replace('<span','<span')):"—",desvio==null?"var(--muted)":desvio>=0?"var(--green)":"var(--red)",desvio!=null?(desvio>=0?"acima do previsto":"abaixo do previsto"):"—")}
+    ${fcCardComp("Entradas",totEP,totER,"entrada")}
+    ${fcCardComp("Saídas",totSP,totSR,"saida")}
+  </div>
+  <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Período analisado: <b>${periodo}</b></div>`;
+  // gráfico saldo
+  const itens=cmp.dias.map(d=>({lb:_ddmmaa(d.d),xl:String(d.dia),acPrev:d.acPrev,acReal:d.acReal,ePrev:d.ePrev,eReal:d.eReal,sPrev:d.sPrev,sReal:d.sReal}));
+  const grafSaldo=`<div class="panel"><div class="pt">Saldo — realizado × previsto <span class="pt-badge">${monthLabel(mesRef)}</span></div>${fcGraficoComp(itens,cutIdx)}</div>`;
+  // movimentação (barras agrupadas por dia)
+  const grafMov=`<div class="panel"><div class="pt">Entradas por dia — previsto × realizado</div>${fcBarrasComp(cmp.dias.map(d=>({lb:String(d.dia),prev:d.ePrev,real:d.temReal?d.eReal:null})))}</div>
+    <div class="panel"><div class="pt">Saídas por dia — previsto × realizado</div>${fcBarrasComp(cmp.dias.map(d=>({lb:String(d.dia),prev:d.sPrev,real:d.temReal?d.sReal:null})))}</div>`;
+  // leitura gerencial
+  const leitura=fcLeituraGerencial(cmp);
+  // tabela diária
+  const dcell=(real,prev,nat)=>{const d=fcDesvio(real,prev,nat);const c=d.good==null?"var(--muted)":d.good?"var(--green)":"var(--red)";
+    return `<td class="r mn" style="font-size:10px;color:var(--muted)">${prev?fRk(prev):"—"}</td><td class="r mn" style="font-size:10px">${real!=null?fRk(real):'<span style="color:var(--muted)">—</span>'}</td><td class="r mn" style="font-size:10px;color:${c}">${d.dif!=null?(d.dif>0?"+":"")+fRk(d.dif):"—"}</td>`;};
+  const dn=["dom","seg","ter","qua","qui","sex","sáb"];
+  const trs=cmp.dias.filter(d=>d.ePrev||d.sPrev||d.temReal).map(d=>`<tr style="${!d.temReal?"opacity:.7":""}">
+    <td>${d.dia}/${d.d.slice(5,7)} <span style="font-size:9px;color:var(--muted)">${dn[d.dow]}</span> ${d.temReal?'<span style="color:var(--green);font-size:9px">●</span>':'<span style="color:var(--brand);font-size:9px">○</span>'}</td>
+    ${dcell(d.eReal,d.ePrev,"entrada")}${dcell(d.sReal,d.sPrev,"saida")}${dcell(d.acReal,d.acPrev,"saldo")}</tr>`).join("");
+  const tabela=`<div class="panel"><div class="pt">Comparativo diário — previsto × realizado</div>
+    <div class="tw"><table style="width:100%;min-width:820px"><thead>
+    <tr><th rowspan="2">Data</th><th colspan="3" class="r" style="background:rgba(34,197,94,.08)">Entradas</th><th colspan="3" class="r" style="background:rgba(220,38,38,.06)">Saídas</th><th colspan="3" class="r" style="background:rgba(37,99,235,.06)">Saldo</th></tr>
+    <tr>${"<th class='r' style='font-size:9px'>Prev</th><th class='r' style='font-size:9px'>Real</th><th class='r' style='font-size:9px'>Desvio</th>".repeat(3)}</tr>
+    </thead><tbody>${trs}</tbody></table></div>
+    <div style="font-size:10px;color:var(--muted);padding-top:6px">● dia com realizado · ○ só previsto (ainda não ocorreu) · "—" em realizado = sem realizado (não é R$ 0).</div></div>`;
+  return cards+grafSaldo+grafMov+leitura+tabela;
+}
+
+// ── CAIXA (tesouraria) — cenários Realizado+Projetado / Só realizado / Só previsto ──
+function fcRenderCaixa(mode,mesRef){
+  if(mode==="realizado"){
+    const real=fcDiarioFonteReal(), proj=fcDiarioFonteProj();
+    const hoje=new Date().toISOString().slice(0,10);
+    const corte=(proj.corte&&proj.corte<=hoje)?proj.corte:hoje;
+    const dR=buildDiario(mesRef,real);
+    const diasReais=dR.dias.filter(x=>x.d<=corte);
+    const eR=diasReais.reduce((a,x)=>a+x.e,0), sR=diasReais.reduce((a,x)=>a+x.s,0);
+    const saldoReal=diasReais.length?diasReais[diasReais.length-1].ac:dR.abertura;
+    const cards=`<div class="cards" style="align-items:stretch">
+      <div class="card" style="border-top-color:var(--blue);flex:1.5 1 190px;min-width:150px"><div class="cl">Saldo realizado</div><div class="cv" style="font-size:26px;color:var(--blue)">${fRk(saldoReal)}</div><div class="cs">Até ${_ddmm(corte)}</div></div>
+      <div class="card" style="border-top-color:var(--green);flex:1 1 150px"><div class="cl">Entradas realizadas</div><div class="cv" style="color:var(--green)">${fRk(eR)}</div><div class="cs">${monthLabel(mesRef)}</div></div>
+      <div class="card" style="border-top-color:var(--gold);flex:1 1 150px"><div class="cl">Saídas realizadas</div><div class="cv" style="color:var(--gold)">${fRk(sR)}</div><div class="cs">${monthLabel(mesRef)}</div></div>
+      <div class="card" style="border-top-color:${eR-sR>=0?"var(--green)":"var(--red)"};flex:1 1 150px"><div class="cl">Resultado realizado</div><div class="cv" style="color:${eR-sR>=0?"var(--green)":"var(--red)"}">${fRk(eR-sR)}</div><div class="cs">Entradas − saídas</div></div>
+    </div>`;
+    const graf=`<div class="panel"><div class="pt">Evolução do caixa — realizado <span class="pt-badge">${monthLabel(mesRef)}</span></div>
+      ${fcGraficoEvo(diasReais.map(x=>({lb:_ddmmaa(x.d),xl:String(x.dia),e:x.e,s:x.s,ac:x.ac})),diasReais.length-1)}</div>`;
+    const rows=(APP.fcData||[]).filter(r=>!r.projecao&&(CUR_MES==="TOTAL"||r.mes===CUR_MES));
+    return cards+graf+fcTabelaMensal(rows.length?rows:(APP.fcData||[]).filter(r=>!r.projecao));
+  }
+  if(mode==="previsto"){
+    const r=fcResumo(mesRef);
+    const cards=`<div class="cards" style="align-items:stretch">
+      <div class="card" style="border-top-color:var(--muted);flex:1 1 150px"><div class="cl">Saldo de partida</div><div class="cv">${fRk(r.saldoDisp)}</div><div class="cs">Real em ${_ddmm(r.corte)}</div></div>
+      <div class="card" style="border-top-color:var(--green);flex:1 1 150px"><div class="cl">Entradas previstas</div><div class="cv" style="color:var(--green)">${fRk(r.entPrev)}</div><div class="cs">até ${_ddmm(r.fim)}</div></div>
+      <div class="card" style="border-top-color:var(--gold);flex:1 1 150px"><div class="cl">Saídas previstas</div><div class="cv" style="color:var(--gold)">${fRk(r.saiPrev)}</div><div class="cs">até ${_ddmm(r.fim)}</div></div>
+      <div class="card" style="border-top-color:${r.saldoProj>=0?"var(--green)":"var(--red)"};flex:1.4 1 180px;min-width:150px"><div class="cl">Saldo projetado</div><div class="cv" style="font-size:24px;color:${r.saldoProj>=0?"var(--green)":"var(--red)"}">${fRk(r.saldoProj)}</div><div class="cs">até ${_ddmm(r.fim)}</div></div>
+      <div class="card" style="border-top-color:${r.necessidade>0?"var(--red)":"var(--green)"};flex:1 1 150px"><div class="cl">Risco de caixa</div><div class="cv" style="font-size:16px;color:${r.necessidade>0?"var(--red)":"var(--green)"}">${r.necessidade>0?"⚠ "+fRk(r.necessidade):"✓ sem risco"}</div><div class="cs">menor saldo ${fR(r.minAc)} · ${_ddmm(r.minData)}</div></div>
+    </div>`;
+    const serie=buildRangeDias(mesRef+"-01",r.fim,r.proj);
+    let cutIdx=-1; serie.dias.forEach((x,i)=>{if(x.d<=r.corte)cutIdx=i;});
+    const graf=`<div class="panel"><div class="pt">Projeção do caixa <span class="pt-badge">${monthLabel(mesRef)}</span></div>
+      ${fcGraficoEvo(serie.dias.map(x=>({lb:_ddmmaa(x.d),xl:String(x.dia),e:x.e,s:x.s,ac:x.ac})),cutIdx)}</div>`;
+    return cards+graf+fcProximosDias();
+  }
+  // Realizado + Projetado (visão completa de tesouraria)
+  const head=fcHeaderComando(mesRef);
+  const rows=(APP.fcData||[]).filter(r=>CUR_MES==="TOTAL"||r.mes===CUR_MES);
+  return head.html+fcTabelaMensal(rows.length?rows:(APP.fcData||[]))+fcProximosDias();
+}
+
 function renderFluxo(){
   const el=document.getElementById("sec-fluxo"); if(!APP){el.innerHTML=splashHTML();return;}
   const mesRef=fcMesRef();
-  // Barra: visão (Mensal/Diário) + cenário
-  const view=`<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px">
+  // Navegação nível 1: CAIXA | REALIZADO × PROJETADO
+  const nav=`<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px">
     <div class="dre-toggle">
-      <button class="dre-tb${FC_VIEW==="mensal"?" a":""}" onclick="setFCView('mensal')">Mensal</button>
-      <button class="dre-tb${FC_VIEW==="diario"?" a":""}" onclick="setFCView('diario')">Diário</button>
+      <button class="dre-tb${FC_TAB==="caixa"?" a":""}" onclick="setFCTab('caixa')">💧 Caixa</button>
+      <button class="dre-tb${FC_TAB==="controladoria"?" a":""}" onclick="setFCTab('controladoria')">⚖ Realizado × Projetado</button>
     </div>
-    <div style="display:flex;align-items:center;gap:6px">
+    ${FC_TAB==="caixa"?`<div style="display:flex;align-items:center;gap:6px">
       <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">Cenário</span>
       <div class="dre-toggle">
-        <button class="dre-tb${FC_MODE==="projetado"||FC_MODE==="ambos"?" a":""}" onclick="setFCMode('projetado')" title="Saldo real atual + projeção">Realizado + Projetado</button>
+        <button class="dre-tb${FC_MODE==="projetado"||FC_MODE==="ambos"?" a":""}" onclick="setFCMode('projetado')">Realizado + Projetado</button>
         <button class="dre-tb${FC_MODE==="realizado"?" a":""}" onclick="setFCMode('realizado')">Só realizado</button>
         <button class="dre-tb${FC_MODE==="previsto"?" a":""}" onclick="setFCMode('previsto')">Só previsto</button>
-      </div>
-    </div>
+      </div></div>`:`<div class="dre-toggle">
+        <button class="dre-tb${FC_VIEW==="mensal"?" a":""}" onclick="setFCView('mensal')">Mensal</button>
+        <button class="dre-tb${FC_VIEW==="diario"?" a":""}" onclick="setFCView('diario')">Diário</button>
+      </div>`}
     <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
       <button class="dre-tb" onclick="fcDiaNav(-1)">‹</button>
       <b style="font-size:13px;color:var(--brand);min-width:78px;text-align:center">${monthLabel(mesRef)}</b>
       <button class="dre-tb" onclick="fcDiaNav(1)">›</button>
     </div>
   </div>`;
-  const head=fcHeaderComando(mesRef);
   let body;
-  if(FC_VIEW==="diario"){
-    body=fcProximosDias();
+  if(FC_TAB==="controladoria"){
+    body=(FC_VIEW==="diario")?fcRenderCtrlDiario():fcRenderCtrlMensal();
   } else {
-    const allFc=FC_MODE==="previsto"?(APP.fcDataPrevisto||[]):(APP.fcData||[]);
-    let rows=allFc;
-    if(CUR_MES!=="TOTAL"&&!dtFrom&&!dtTo) rows=allFc.filter(r=>r.mes===CUR_MES);
-    else if(dtFrom||dtTo) rows=allFc.filter(r=>(!dtFrom||r.mes>=dtFrom)&&(!dtTo||r.mes<=dtTo));
-    if(!rows.length)rows=allFc;
-    body=fcTabelaMensal(rows)+fcRealXProj(mesRef);
+    body=fcRenderCaixa(FC_MODE,mesRef);
   }
-  el.innerHTML=view+head.html+body;
+  el.innerHTML=nav+body;
 }
+window.setFCTab=function(t){ FC_TAB=t; if(t==="controladoria"&&(FC_MODE==="projetado"||FC_MODE==="ambos")){} render(); };
+
 function renderFluxoDiario(){ return ""; } // compat (o diário agora é servido pelo dispatcher)
 
 window.setFCView=function(v){ FC_VIEW=v; if(v==="mensal"&&FC_MODE==="projetado"){} render(); };
