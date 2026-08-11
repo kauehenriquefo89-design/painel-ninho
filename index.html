@@ -214,6 +214,13 @@ function calcImpostos(rb){
 }
 
 // ── NORMALIZADORES PARA PREVISTO (todos os lançamentos, pagos ou não) ────────
+// Aporte / empréstimo de sócio: evento de financiamento (necessidade de caixa),
+// NÃO é operacional. Fica fora de toda PREVISÃO e da DRE. O realizado (dinheiro que
+// já entrou no banco) é preservado, para o saldo continuar batendo com o extrato.
+function isAporteSocio(cat){
+  const c=(cat||"").toLowerCase();
+  return c.includes("sócio")||c.includes("socio")||c.includes("aporte");
+}
 function normalizarCRprevisto(item){
   if(isTransfer(item))return null;
   const total=toNum(item.total||0);
@@ -221,11 +228,13 @@ function normalizarCRprevisto(item){
   const mes=toYYYYMM(item.data_vencimento||item.data_competencia);
   if(!mes)return null;
   const cat=item.categorias?.[0]?.nome||item.descricao||"";
+  if(isAporteSocio(cat))return null;   // aporte de sócio fora da previsão
   return{mes,cat,e:total};
 }
 function normalizarCPprevisto(item){
   if(isTransfer(item))return null;
   const cat=item.categorias?.[0]?.nome||item.descricao||"";
+  if(isAporteSocio(cat))return null;   // aporte de sócio fora da previsão
   const grupo=getGrupoCp(cat);
   if(grupo==="imposto")return null;
   const total=toNum(item.total||0);
@@ -2451,11 +2460,13 @@ function fcDiarioFontePrev(){
   const rows=[];
   if(CA_DATA){
     (CA_DATA.cr||[]).forEach(it=>{if(isTransfer(it))return;const t=toNum(it.total||0);if(!t)return;
+      const ct=(it.categorias&&it.categorias[0]&&it.categorias[0].nome)||"";if(isAporteSocio(ct))return;
       const d=(it.data_vencimento||it.data_competencia||"").slice(0,10);if(!d)return;
-      rows.push({d,v:t,ds:(it.cliente&&(it.cliente.nome||it.cliente.razao_social))||it.descricao||"A receber",c:(it.categorias&&it.categorias[0]&&it.categorias[0].nome)||""});});
+      rows.push({d,v:t,ds:(it.cliente&&(it.cliente.nome||it.cliente.razao_social))||it.descricao||"A receber",c:ct});});
     (CA_DATA.cp||[]).forEach(it=>{if(isTransfer(it))return;const t=toNum(it.total||0);if(!t)return;
+      const ct=(it.categorias&&it.categorias[0]&&it.categorias[0].nome)||"";if(isAporteSocio(ct))return;
       const d=(it.data_vencimento||it.data_competencia||"").slice(0,10);if(!d)return;
-      rows.push({d,v:-t,ds:it.descricao||"A pagar",c:(it.categorias&&it.categorias[0]&&it.categorias[0].nome)||""});});
+      rows.push({d,v:-t,ds:it.descricao||"A pagar",c:ct});});
   }
   return{rows,fonte:"ca"};
 }
@@ -2492,9 +2503,9 @@ function fcDiarioFonteProj(){
   if(corte>hoje)corte=hoje;
   // Camada 3: em aberto (total − pago) com vencimento depois do corte = previsão
   if(CA_DATA){
-    (CA_DATA.cr||[]).forEach(it=>{if(isTransfer(it))return;const ab=toNum(it.total||0)-toNum(it.pago||0);if(ab<=0)return;
+    (CA_DATA.cr||[]).forEach(it=>{if(isTransfer(it))return;if(isAporteSocio(cat(it)))return;const ab=toNum(it.total||0)-toNum(it.pago||0);if(ab<=0)return;
       const d=dv(it); if(!d||d<=corte)return; rows.push({d,v:ab,ds:nomeCli(it),c:cat(it),k:"P",f:"ca"});});
-    (CA_DATA.cp||[]).forEach(it=>{if(isTransfer(it))return;const ab=toNum(it.total||0)-toNum(it.pago||0);if(ab<=0)return;
+    (CA_DATA.cp||[]).forEach(it=>{if(isTransfer(it))return;if(isAporteSocio(cat(it)))return;const ab=toNum(it.total||0)-toNum(it.pago||0);if(ab<=0)return;
       const d=dv(it); if(!d||d<=corte)return; rows.push({d,v:-ab,ds:it.descricao||"A pagar",c:cat(it),k:"P",f:"ca"});});
   }
   const temPrev=rows.some(r=>r.k==="P");
