@@ -185,7 +185,7 @@ function getProcColor(name){
 }
 const STORE  = "/api/store";
 const PLUGGY = "/api/pluggy";
-const POLL_MS = 300000;
+const POLL_MS = 900000; // 15 min (era 5) — atualização em segundo plano
 const TAX = {pis:0.0065, cofins:0.03, iss:0.05};
 const BASE_PRESUMIDA = 0.32; // Lucro Presumido: base de cálculo para serviços
 
@@ -3399,16 +3399,32 @@ async function logout(){
 async function loadCA(isRefresh){
   try{
     const r=await fetch(API+"?action=data",{headers:authHeaders()});
-    if(r.status===401){if(!isRefresh)render();return;}
+    if(r.status===401){
+      // Em atualização de fundo, não derruba a sessão nem re-renderiza: tenta de novo
+      // no próximo ciclo (o backend renova o token). Só mostra login se foi ação do usuário.
+      if(!isRefresh)render();
+      return;
+    }
     if(!r.ok)throw new Error("HTTP "+r.status);
     const raw=await r.json();if(raw.error)throw new Error(raw.error);
-    LAPA_CA=raw;if(UNIT!=="vm")applyUnit();
+    // Só re-renderiza se os dados realmente mudaram — evita a página "se atualizar sozinha".
+    const mudou = JSON.stringify(raw)!==JSON.stringify(LAPA_CA);
+    LAPA_CA=raw;
+    if(mudou && UNIT!=="vm")applyUnit();
     document.getElementById("btn-ca").textContent="⚡ CA ✓";
     document.getElementById("btn-ca").style.borderColor="rgba(74,222,128,.7)";
     document.getElementById("btn-logout").style.display="flex";
   }catch(e){console.error(e);isLoadingCA=false;updateSyncBadge(false);if(!isRefresh){const el=document.getElementById("sec-dre");if(el)el.innerHTML=`<div class="err-box"><b>Erro:</b> ${e.message}</div>`;}}
 }
-function startPollingCA(){if(pollTimer)clearInterval(pollTimer);pollTimer=setInterval(()=>loadCA(true),POLL_MS);}
+function startPollingCA(){
+  if(pollTimer)clearInterval(pollTimer);
+  // Só atualiza em segundo plano quando a aba está visível (não faz nada com a aba oculta).
+  pollTimer=setInterval(()=>{ if(!document.hidden) loadCA(true); },POLL_MS);
+  // Ao voltar o foco à aba, faz uma atualização silenciosa única.
+  if(!window.__fcVisBound){ window.__fcVisBound=true;
+    document.addEventListener("visibilitychange",()=>{ if(!document.hidden) loadCA(true); });
+  }
+}
 // ── AUTENTICAÇÃO ──────────────────────────────────────────────────────────
 // Para alterar a senha: substitua "Ninho@2026" nas duas ocorrências abaixo
 let AUTH_KEY = "";           // senha de acesso (guardada no navegador)
