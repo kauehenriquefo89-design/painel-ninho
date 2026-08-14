@@ -11,6 +11,16 @@ const GITHUB_REPO  = "painel-ninho";
 const GITHUB_TOKEN_FILE = "data/token.json";
 const GITHUB_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_TOKEN_FILE}`;
 
+// Controle de acesso: api.js so serve dados da Lapa -> exige "full".
+// Se nenhuma senha estiver configurada, libera (compat).
+function accessAllowed(req) {
+  const full = process.env.ACCESS_KEY_FULL || "";
+  const vm   = process.env.ACCESS_KEY_VM   || "";
+  if (!full && !vm) return true;
+  const key = (req.headers && req.headers["x-access-key"]) || (req.query && req.query.key) || "";
+  return full && key === full;
+}
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ── GitHub token storage ───────────────────────────────────────────────────
@@ -63,10 +73,14 @@ function getTokenFromCookie(cookieHeader) {
 
 // ── Resolve token: cookie > github ────────────────────────────────────────
 async function resolveToken(cookieHeader) {
-  const fromCookie = getTokenFromCookie(cookieHeader);
-  if (fromCookie) return { token: fromCookie, source: "cookie", sha: null };
+  // GitHub é a fonte da verdade: o refresh_token do Conta Azul é ROTATIVO e de uso
+  // único. Se lermos de um cookie desatualizado (outro dispositivo, outra aba, cache),
+  // o refresh_token já foi rotacionado e está morto → o refresh falha e o painel pede
+  // login/2FA de novo. Lendo sempre do GitHub, há um único refresh_token, sempre atual.
   const fromGH = await getTokenFromGitHub();
   if (fromGH) return { token: fromGH.token, source: "github", sha: fromGH.sha };
+  const fromCookie = getTokenFromCookie(cookieHeader);   // fallback só no 1º login
+  if (fromCookie) return { token: fromCookie, source: "cookie", sha: null };
   return null;
 }
 
@@ -155,9 +169,11 @@ async function fetchFinancialData(access_token) {
 // ── Handler ────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-access-key");
   res.setHeader("Content-Type", "application/json");
   if (req.method === "OPTIONS") return res.status(204).end();
+
+  if (!accessAllowed(req)) return res.status(403).json({ error: "forbidden" });
 
   const action = (req.query || {}).action;
   const cookieHeader = req.headers.cookie || "";
@@ -182,16 +198,22 @@ module.exports = async (req, res) => {
 
   let { token, source, sha } = resolved;
 
-  if (Date.now() > token.expires_at - 60_000) {
+  if (Date.now() > token.expires_at - 120_000) {
     const refreshed = await refreshAccessToken(token.refresh_token);
-    if (!refreshed) return res.status(401).json({ error: "token_expired" });
-    token = refreshed;
-    // Atualiza no GitHub (não precisa de redeploy)
-    const current = await getTokenFromGitHub();
-    await saveTokenToGitHub(token, current?.sha || sha);
-    if (source === "cookie") {
-      const encoded = Buffer.from(JSON.stringify(token)).toString("base64");
-      res.setHeader("Set-Cookie", `ca_token=${encoded}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`);
+    if (refreshed) {
+      token = refreshed;
+      // Persiste o novo par (access + refresh rotacionado) no GitHub — sem redeploy.
+      const current = await getTokenFromGitHub();
+      await saveTokenToGitHub(token, current?.sha || sha);
+    } else {
+      // O refresh pode ter falhado porque outra requisição concorrente já rotacionou
+      // o refresh_token. Releia o token mais recente do GitHub antes de derrubar a sessão.
+      const latest = await getTokenFromGitHub();
+      if (latest && Date.now() < latest.token.expires_at - 60_000) {
+        token = latest.token;
+      } else {
+        return res.status(401).json({ error: "token_expired" });
+      }
     }
   }
 
