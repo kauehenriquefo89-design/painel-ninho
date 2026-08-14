@@ -2830,7 +2830,7 @@ function fcDailyCompare(ini,fim){
 function fcMonthlyCompare(meses){
   const R=APP.fcData||[], P=APP.fcDataPrevisto||[];
   return meses.map(m=>{
-    const r=R.find(x=>x.mes===m), p=P.find(x=>x.mes===m);
+    const r=R.find(x=>x.mes===m&&!x.projecao), p=P.find(x=>x.mes===m);
     return {mes:m, m:monthLabel(m),
       ePrev:p?p.e:null, eReal:r?r.e:null,
       sPrev:p?p.s:null, sReal:r?r.s:null,
@@ -2974,9 +2974,13 @@ function fcCardComp(titulo,prev,real,natureza){
 
 // ── CONTROLADORIA — MENSAL ──
 function fcRenderCtrlMensal(){
-  let meses=(APP.mesesVisiveis||[]).slice();
-  if(CUR_MES!=="TOTAL"&&!dtFrom&&!dtTo)meses=meses.filter(m=>m===CUR_MES);
-  else if(dtFrom||dtTo)meses=meses.filter(m=>(!dtFrom||m>=dtFrom)&&(!dtTo||m<=dtTo));
+  // Todos os meses com dados (realizado OU previsto) — inclusive meses futuros,
+  // onde há previsto mas ainda não há realizado. Não filtra por mês único: o sentido
+  // do comparativo é ver os meses lado a lado. Respeita apenas o filtro De/Até.
+  const mesesReal=(APP.fcData||[]).filter(r=>!r.projecao).map(r=>r.mes);
+  const mesesPrev=(APP.fcDataPrevisto||[]).map(r=>r.mes);
+  let meses=[...new Set([...mesesReal,...mesesPrev].filter(Boolean))].sort();
+  if(dtFrom||dtTo)meses=meses.filter(m=>(!dtFrom||m>=dtFrom)&&(!dtTo||m<=dtTo));
   if(!meses.length)meses=(APP.mesesVisiveis||[]).slice();
   const cmp=fcMonthlyCompare(meses);
   const som=(k)=>cmp.reduce((a,c)=>a+(c[k]||0),0);
