@@ -141,6 +141,7 @@ td.rd{color:var(--red)}td.gn{color:var(--green)}
     <button class="tb" onclick="showTab('disc',this)">🏥 Procedimentos</button>
     <button class="tb" onclick="showTab('cat',this)">📂 Categorias</button>
     <button class="tb" onclick="showTab('fluxo',this)">💰 Fluxo de Caixa</button>
+    <button class="tb" onclick="showTab('resumo',this)">📋 Resumo Diário</button>
     <button class="tb" onclick="showTab('inadimp',this)">⚠ Inadimplência</button>
     <button class="tb" onclick="showTab('impostos',this)">🧾 Impostos</button>
   </div>
@@ -163,6 +164,7 @@ td.rd{color:var(--red)}td.gn{color:var(--green)}
   <div id="sec-disc" class="sec"></div>
   <div id="sec-cat" class="sec"></div>
   <div id="sec-fluxo" class="sec"></div>
+  <div id="sec-resumo" class="sec"></div>
   <div id="sec-inadimp" class="sec"></div>
   <div id="sec-impostos" class="sec"></div>
 </div>
@@ -3298,6 +3300,151 @@ function renderImpostos(){
   </tbody></table></div><p class="note">⚠ CSLL e IRPJ apurados trimestralmente. Confirme sempre com seu contador.</p></div>`;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+//  RESUMO DIÁRIO — previsto × realizado do dia anterior, variação e o porquê
+//  Deriva das funções-fonte (fcDailyCompare / fcDiarioFontePrev / fcDiarioFonteReal).
+// ══════════════════════════════════════════════════════════════════════════
+let RESUMO_DATA = null;   // data alvo (YYYY-MM-DD); null = último dia com movimento
+
+// Último dia com movimento realizado que seja <= ontem (default do resumo)
+function fcUltimoDiaMovimento(){
+  const hoje=new Date(); const ontem=new Date(hoje); ontem.setDate(ontem.getDate()-1);
+  const oIso=ontem.toISOString().slice(0,10);
+  const real=fcDiarioFonteReal();
+  const dias=[...new Set(real.rows.map(r=>r.d))].filter(d=>d<=oIso).sort();
+  return dias.length?dias[dias.length-1]:oIso;
+}
+
+// Motor do relatório para uma data
+function fcRelatorioDiario(dAlvo){
+  const d=dAlvo||fcUltimoDiaMovimento();
+  const mes=d.slice(0,7), [y,mo]=mes.split("-").map(Number);
+  const fim=mes+"-"+String(new Date(y,mo,0).getDate()).padStart(2,"0");
+  const cmp=fcDailyCompare(mes+"-01",fim);
+  const dia=cmp.dias.find(x=>x.d===d)||{d,ePrev:0,sPrev:0,acPrev:0,eReal:null,sReal:null,acReal:null,temReal:false};
+  // Lançamentos previstos × realizados do dia, por categoria
+  const prevRows=fcDiarioFontePrev().rows.filter(r=>r.d===d);
+  const realRows=fcDiarioFonteReal().rows.filter(r=>r.d===d);
+  const cats={};
+  const g=(c)=>{const k=c||"Sem categoria"; return cats[k]||(cats[k]={c:k,pe:0,re:0,ps:0,rs:0});};
+  prevRows.forEach(r=>{const o=g(r.c); if(r.v>0)o.pe+=r.v; else o.ps+=-r.v;});
+  realRows.forEach(r=>{const o=g(r.c); if(r.v>0)o.re+=r.v; else o.rs+=-r.v;});
+  // Impacto de cada categoria no desvio de saldo do dia: (real−prev) entradas + (prev−real) saídas
+  const drivers=Object.values(cats).map(x=>({...x,imp:(x.re-x.pe)+(x.ps-x.rs)}))
+    .filter(x=>Math.abs(x.imp)>=1).sort((a,b)=>Math.abs(b.imp)-Math.abs(a.imp));
+  return {d,dia,drivers,temReal:dia.temReal,corte:cmp.corte};
+}
+
+// Descreve um driver em linguagem natural
+function fcDriverTexto(x){
+  const ent=Math.abs(x.re-x.pe), sai=Math.abs(x.rs-x.ps);
+  const sinal=x.imp>=0?"+":"−", val=fR(Math.abs(x.imp));
+  if(ent>=sai){
+    if(x.re<x.pe) return `${x.c}: recebimento previsto de ${fR(x.pe)} ${x.re>0?`entrou só ${fR(x.re)}`:"não entrou"} (${sinal}${val})`;
+    return `${x.c}: recebido ${fR(x.re)} vs ${fR(x.pe)} previsto — entrada a mais/adiantada (${sinal}${val})`;
+  } else {
+    if(x.rs<x.ps) return `${x.c}: pagamento previsto de ${fR(x.ps)} ${x.rs>0?`saiu só ${fR(x.rs)}`:"não saiu"} (${sinal}${val})`;
+    return `${x.c}: pago ${fR(x.rs)} vs ${fR(x.ps)} previsto — saída a mais (${sinal}${val})`;
+  }
+}
+
+const _wd=["domingo","segunda","terça","quarta","quinta","sexta","sábado"];
+function _dataExt(d){const dt=new Date(d+"T12:00:00");return _wd[dt.getDay()]+", "+_ddmmaa(d);}
+
+// Texto puro para copiar (WhatsApp/e-mail)
+function fcResumoTexto(rel){
+  const {dia,drivers}=rel;
+  const dv=(dia.acReal!=null)?dia.acReal-dia.acPrev:null;
+  const desvE=(dia.eReal!=null)?dia.eReal-dia.ePrev:null;
+  const desvS=(dia.sReal!=null)?dia.sReal-dia.sPrev:null;
+  const L=[];
+  L.push(`Fluxo de caixa — ${_dataExt(rel.d)}`);
+  L.push(``);
+  if(!dia.temReal){ L.push(`Sem movimento realizado nesta data.`); return L.join("\n"); }
+  L.push(`Entradas: previsto ${fR(dia.ePrev)} · realizado ${fR(dia.eReal)}${desvE!=null?` (${desvE>=0?"+":"−"}${fR(Math.abs(desvE))})`:""}`);
+  L.push(`Saídas:   previsto ${fR(dia.sPrev)} · realizado ${fR(dia.sReal)}${desvS!=null?` (${desvS>=0?"+":"−"}${fR(Math.abs(desvS))})`:""}`);
+  const smReal=dia.eReal-dia.sReal, smPrev=dia.ePrev-dia.sPrev, dvDia=smReal-smPrev;
+  L.push(`Saldo do dia: realizado ${fR(smReal)} · previsto ${fR(smPrev)} · desvio ${dvDia>=0?"+":"−"}${fR(Math.abs(dvDia))}`);
+  L.push(`Saldo acumulado no fim do dia: ${fR(dia.acReal)} (previsto no mês ${fR(dia.acPrev)})`);
+  L.push(``);
+  if(!drivers.length || Math.abs(dvDia)<1){
+    L.push(`Sem variação relevante: o dia saiu praticamente conforme o previsto.`);
+  } else {
+    L.push(`Por que houve variação:`);
+    drivers.slice(0,6).forEach(x=>L.push(`• ${fcDriverTexto(x)}`));
+  }
+  return L.join("\n");
+}
+
+function renderResumoDia(){
+  const el=document.getElementById("sec-resumo"); if(!APP){el.innerHTML=splashHTML();return;}
+  const alvo=RESUMO_DATA||fcUltimoDiaMovimento();
+  const rel=fcRelatorioDiario(alvo);
+  const {dia,drivers}=rel;
+  const dv=(dia.acReal!=null)?dia.acReal-dia.acPrev:null;
+  const desvE=(dia.eReal!=null)?dia.eReal-dia.ePrev:null;
+  const desvS=(dia.sReal!=null)?dia.sReal-dia.sPrev:null;
+  const card=(lbl,prev,real,desv,nat)=>{
+    const good=desv==null?null:(nat==="saida"?desv<=0:desv>=0);
+    const cor=good==null?"var(--muted)":good?"var(--green)":"var(--red)";
+    return `<div class="card" style="border-top-color:${cor};flex:1 1 170px;min-width:150px">
+      <div class="cl">${lbl}</div>
+      <div style="display:flex;gap:10px;align-items:baseline"><div><div style="font-size:9px;color:var(--muted)">Prev.</div><div class="mn" style="font-size:14px">${fRk(prev)}</div></div>
+      <div><div style="font-size:9px;color:var(--muted)">Real.</div><div class="mn" style="font-size:17px;font-weight:700">${real!=null?fRk(real):'<span style="color:var(--muted)">—</span>'}</div></div></div>
+      <div class="cs" style="color:${cor};font-weight:600">${desv!=null?(desv>=0?"+":"−")+fR(Math.abs(desv)):"sem realizado"}</div></div>`;
+  };
+  const nav=`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <button class="dre-tb" onclick="resumoNav(-1)">‹ dia anterior</button>
+    <b style="font-size:14px;color:var(--brand)">${_dataExt(rel.d)}</b>
+    <button class="dre-tb" onclick="resumoNav(1)">próximo dia ›</button>
+    <button class="dre-tb" onclick="resumoHoje()" style="margin-left:6px">↻ dia anterior a hoje</button>
+    <button class="splash-btn" style="margin-left:auto;padding:7px 14px" onclick="copiarResumo()">📋 Copiar resumo</button>
+  </div>`;
+  let corpo;
+  if(!dia.temReal){
+    corpo=`<div class="no-data">Sem movimento realizado em ${_ddmmaa(rel.d)}.<br><span style="font-size:11px;color:var(--muted)">Use ‹ › para escolher outro dia.</span></div>`;
+  } else {
+    const smReal=dia.eReal-dia.sReal, smPrev=dia.ePrev-dia.sPrev, dvDia=smReal-smPrev;
+    const cards=`<div class="cards" style="align-items:stretch">
+      ${card("Entradas do dia",dia.ePrev,dia.eReal,desvE,"entrada")}
+      ${card("Saídas do dia",dia.sPrev,dia.sReal,desvS,"saida")}
+      ${card("Saldo do dia",smPrev,smReal,dvDia,"resultado")}
+      <div class="card" style="border-top-color:var(--blue);flex:1.1 1 160px;min-width:150px">
+        <div class="cl">Saldo acumulado</div><div class="cv" style="font-size:20px;color:var(--blue)">${fRk(dia.acReal)}</div>
+        <div class="cs">no fim do dia · previsto no mês ${fRk(dia.acPrev)}</div></div>
+    </div>`;
+    let porque;
+    if(!drivers.length||Math.abs(dvDia)<1){
+      porque=`<div class="panel"><div class="pt">Por que houve variação</div>
+        <div style="font-size:13px;color:var(--green);padding:4px 0">✓ Sem variação relevante — o dia saiu praticamente conforme o previsto.</div></div>`;
+    } else {
+      porque=`<div class="panel"><div class="pt">Por que houve variação <span class="pt-badge">principais causas</span></div>
+        <ul style="margin:4px 0 0;padding-left:18px;font-size:13px;line-height:1.9">${drivers.slice(0,6).map(x=>`<li style="color:${x.imp>=0?"var(--green)":"var(--red)"}">${fcDriverTexto(x)}</li>`).join("")}</ul>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px">Verde = ajudou o caixa (recebeu a mais ou pagou menos que o previsto) · vermelho = piorou.</div></div>`;
+    }
+    corpo=cards+porque;
+  }
+  const texto=fcResumoTexto(rel).replace(/</g,"&lt;");
+  const bloco=`<div class="panel"><div class="pt">Texto para copiar <span class="pt-badge">pronto para WhatsApp / e-mail</span></div>
+    <pre id="resumo-texto" style="white-space:pre-wrap;font-family:inherit;font-size:12.5px;background:var(--hover);border-radius:8px;padding:12px;margin:0;line-height:1.7">${texto}</pre></div>`;
+  el.innerHTML=`<div class="src-info">📋 Resumo do dia — previsto × realizado, com as causas da variação. Fonte: mesma do fluxo de caixa (extrato + Conta Azul).</div>${nav}${corpo}${bloco}`;
+}
+
+window.resumoNav=function(delta){
+  const base=RESUMO_DATA||fcUltimoDiaMovimento();
+  const d=new Date(base+"T12:00:00"); d.setDate(d.getDate()+delta);
+  RESUMO_DATA=d.toISOString().slice(0,10); render();
+};
+window.resumoHoje=function(){ RESUMO_DATA=null; render(); };
+window.copiarResumo=function(){
+  const rel=fcRelatorioDiario(RESUMO_DATA||fcUltimoDiaMovimento());
+  const txt=fcResumoTexto(rel);
+  const done=()=>{const b=document.querySelector('[onclick="copiarResumo()"]'); if(b){const o=b.textContent;b.textContent="✓ Copiado!";setTimeout(()=>b.textContent=o,1600);}};
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(()=>{fallbackCopy(txt);done();}); }
+  else { fallbackCopy(txt); done(); }
+};
+function fallbackCopy(txt){ try{const ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);}catch(e){} }
+
 function render(){
   try{
     if(!APP){
@@ -3315,6 +3462,7 @@ function render(){
     else if(CUR_TAB==="fluxo")      renderFluxo();
     else if(CUR_TAB==="inadimp")    renderInadimp();
     else if(CUR_TAB==="impostos")   renderImpostos();
+    else if(CUR_TAB==="resumo")     renderResumoDia();
   }catch(e){console.error("Render error:",e);const el=document.getElementById("sec-"+CUR_TAB);if(el)el.innerHTML=`<div class="err-box"><b>Erro interno:</b> ${e.message}</div>`;}
 }
 
