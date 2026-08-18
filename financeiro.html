@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Barbearia Stylo de Minas — Painel financeiro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#11151b; --surface:#1a2028; --surface-2:#212934;
+    --border:rgba(234,229,218,.09); --border-strong:rgba(234,229,218,.16);
+    --cream:#ece6d9; --muted:#93989f;
+    --brass:#c99b4a; --brass-soft:rgba(201,155,74,.14);
+    --burgundy:#b1543b; --burgundy-soft:rgba(177,84,59,.14);
+    --sage:#6e9270; --sage-soft:rgba(110,146,112,.14);
+    --amber:#d3a441; --amber-soft:rgba(211,164,65,.14);
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--ink);color:var(--cream);font-family:'Inter',sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased;}
+  h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;letter-spacing:-.01em;}
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum";}
+  ::selection{background:var(--brass-soft);color:var(--cream);}
+
+  header.top{position:sticky;top:0;z-index:20;background:rgba(17,21,27,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:16px 28px 0;}
+  .top-row{display:flex;align-items:center;justify-content:space-between;max-width:1180px;margin:0 auto 14px;gap:16px;flex-wrap:wrap;}
+  .brand{display:flex;align-items:center;gap:12px;}
+  .brand .mark{width:34px;height:34px;border:1px solid var(--brass);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--brass);font-family:'Fraunces',serif;font-weight:600;font-size:15px;flex-shrink:0;}
+  .brand h1{font-size:17px;margin:0;line-height:1.1;}
+  .brand p{font-size:11.5px;color:var(--muted);margin:2px 0 0;letter-spacing:.03em;text-transform:uppercase;}
+  .top-acoes{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .voltar{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:700;text-decoration:none;background:var(--brass);color:#1a1305;border-radius:8px;padding:9px 15px;}
+  .voltar:hover{filter:brightness(1.08);}
+  .stamp{font-size:11.5px;color:var(--muted);border:1px solid var(--border-strong);border-radius:99px;padding:6px 13px;display:flex;align-items:center;gap:7px;}
+  .stamp b{color:var(--cream);font-weight:600;}
+  .stamp .dot{width:7px;height:7px;border-radius:50%;background:var(--sage);flex-shrink:0;}
+
+  nav.tabs{display:flex;gap:4px;max-width:1180px;margin:0 auto;overflow-x:auto;}
+  nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-size:13.5px;font-weight:600;padding:10px 14px;cursor:pointer;white-space:nowrap;font-family:inherit;}
+  nav.tabs button:hover{color:var(--cream);}
+  nav.tabs button.active{color:var(--brass);border-bottom-color:var(--brass);}
+
+  /* seletor de período */
+  .periodo{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 28px;position:sticky;top:104px;z-index:19;}
+  .periodo-row{max-width:1180px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .periodo .lab{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;}
+  .chips{display:flex;gap:5px;flex-wrap:wrap;}
+  .chips button{background:var(--surface-2);border:1px solid var(--border-strong);color:var(--muted);border-radius:7px;padding:7px 12px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .chips button.on{background:var(--brass);border-color:var(--brass);color:#1a1305;}
+  .chips button:hover:not(.on){color:var(--cream);}
+  .chips .sep{width:1px;background:var(--border-strong);margin:2px 4px;align-self:stretch;}
+  .atalhos{display:flex;gap:5px;margin-left:auto;flex-wrap:wrap;}
+  .atalhos button{background:none;border:1px solid var(--border-strong);color:var(--muted);border-radius:99px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit;}
+  .atalhos button:hover{color:var(--cream);border-color:var(--brass);}
+
+  main{max-width:1180px;margin:0 auto;padding:28px 28px 90px;}
+  .view{display:none;} .view.active{display:block;}
+  .section-title{margin:30px 0 14px;}
+  .section-title:first-child{margin-top:0;}
+  .eyebrow{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--brass);margin:0 0 4px;font-weight:700;}
+  .section-title h2{font-size:20px;margin:0;}
+  .section-title p{font-size:13px;color:var(--muted);margin:5px 0 0;line-height:1.6;max-width:70ch;}
+
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;}
+  .kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;}
+  .kpi .label{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 7px;}
+  .kpi .value{font-family:'Fraunces',serif;font-size:23px;margin:0;line-height:1.1;}
+  .kpi .sub{font-size:11.5px;color:var(--muted);margin:6px 0 0;}
+  .kpi .value.brass{color:var(--brass);} .kpi .value.burg{color:var(--burgundy);} .kpi .value.sage{color:var(--sage);}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;margin-bottom:16px;}
+  .card h3{font-size:15px;margin:0 0 16px;}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th{text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:0 10px 9px 0;border-bottom:1px solid var(--border);white-space:nowrap;}
+  td{padding:9px 10px 9px 0;border-bottom:1px solid var(--border);}
+  tbody tr:last-child td{border-bottom:none;}
+  tr.total td{border-top:1px solid var(--border-strong);font-weight:700;border-bottom:none;}
+  .r{text-align:right;}
+  .fone{color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:12px;}
+  .flag{font-size:11px;padding:2px 7px;border-radius:5px;font-weight:600;white-space:nowrap;}
+  .f-bad{background:var(--burgundy-soft);color:var(--burgundy);}
+  .f-ok{background:var(--sage-soft);color:var(--sage);}
+  .f-mid{background:var(--amber-soft);color:var(--amber);}
+  .bar{height:5px;border-radius:3px;background:var(--surface-2);overflow:hidden;min-width:60px;}
+  .bar span{display:block;height:100%;background:var(--brass);}
+  .bar-row{display:grid;grid-template-columns:minmax(120px,1.4fr) 3fr auto;align-items:center;gap:14px;padding:7px 0;font-size:13.5px;}
+  .bar-row .lbl{color:var(--cream);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .bar-row .val{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .scroll{overflow-x:auto;}
+  .dre-lin td:first-child{padding-left:0;}
+  .dre-sec td{font-weight:700;color:var(--brass);padding-top:16px;text-transform:uppercase;font-size:11px;letter-spacing:.08em;}
+  .dre-tot td{font-weight:700;border-top:1px solid var(--border-strong);}
+  .n2 td:first-child{padding-left:18px;color:var(--muted);}
+  .cap{text-transform:capitalize;}
+  .nota{font-size:12.5px;color:var(--amber);line-height:1.6;margin:14px 0 0;}
+  .nota.topo{margin:0 0 14px;}
+  .vazio{color:var(--muted);font-size:13.5px;padding:22px 0;text-align:center;}
+  .estado{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:34px 26px;text-align:center;}
+  .estado h3{margin:0 0 8px;font-size:17px;}
+  .estado p{margin:0;color:var(--muted);font-size:13.5px;line-height:1.6;}
+  .estado.erro{border-color:var(--burgundy);} .estado.erro h3{color:var(--burgundy);}
+  .pulse{width:26px;height:26px;border:2px solid var(--border-strong);border-top-color:var(--brass);border-radius:50%;margin:0 auto 16px;animation:spin .9s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .hidden{display:none;}
+  .inp{background:var(--ink);border:1px solid var(--border-strong);color:var(--cream);border-radius:6px;padding:6px 9px;font-family:'Fraunces',serif;font-size:16px;width:66px;}
+  .foot{max-width:1180px;margin:0 auto;padding:0 28px 60px;color:var(--muted);font-size:12.5px;line-height:1.7;}
+  @media (max-width:760px){
+    .periodo{top:auto;position:static;} header.top{padding:14px 18px 0;}
+    main{padding:22px 18px 70px;} .periodo{padding:12px 18px;}
+    .atalhos{margin-left:0;} .hide-sm{display:none;}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;} .pulse{animation:none;}}
+</style>
+<script src="auth.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <div class="brand">
+      <div class="mark">B</div>
+      <div><h1>Barbearia Stylo de Minas</h1><p>Painel financeiro</p></div>
+    </div>
+    <div class="top-acoes">
+      <a class="voltar" href="index.html">← Ver oportunidades</a>
+      <span class="stamp"><span class="dot"></span><span id="ref">Carregando…</span></span>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-view="visao" class="active">Visão Geral</button>
+    <button data-view="dre">DRE</button>
+    <button data-view="despesas">Despesas</button>
+    <button data-view="equipe">Equipe</button>
+    <button data-view="servicos">Serviços</button>
+    <button data-view="clientes">Clientes</button>
+  </nav>
+</header>
+
+<div class="periodo hidden" id="periodo">
+  <div class="periodo-row">
+    <span class="lab">Período</span>
+    <div class="chips" id="chips"></div>
+    <div class="atalhos">
+      <button data-atalho="ultimo">Último mês</button>
+      <button data-atalho="tres">Últimos 3</button>
+      <button data-atalho="tudo">Tudo</button>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div id="estado" class="estado"><div class="pulse"></div><h3>Lendo a planilha</h3><p>Agregando os atendimentos por mês.</p></div>
+
+  <section class="view active" id="view-visao"></section>
+  <section class="view" id="view-dre"></section>
+  <section class="view" id="view-despesas"></section>
+  <section class="view" id="view-equipe"></section>
+  <section class="view" id="view-servicos"></section>
+  <section class="view" id="view-clientes"></section>
+</main>
+
+<div class="foot" id="rodape"></div>
+<script>
+const CONFIG = {
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbxmzzwhr-J4SkNQLhYJtyG5CychRBgJ6ercnmCAFL54J9EO0pATDBvLh-U324Kuq2CJ/exec",
+  TOKEN: "Kauemancha35*"   // fica inerte quando o auth.js entrar; trocado no Apps Script
+};
+
+let D = null, SEL = [], COMISSAO = 50, MULTIANO = false;
+
+const brl  = v => 'R$ ' + Math.round(v || 0).toLocaleString('pt-BR');
+const brlc = v => (v || 0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
+const int  = v => Math.round(v || 0).toLocaleString('pt-BR');
+const pct  = (v, t) => t ? (v/t*100).toLocaleString('pt-BR',{maximumFractionDigits:1}) + '%' : '0%';
+const dtf  = s => { const [a,m,d] = s.split('-'); return `${d}/${m}/${a}`; };
+const MESES = {'01':'Janeiro','02':'Fevereiro','03':'Março','04':'Abril','05':'Maio','06':'Junho',
+               '07':'Julho','08':'Agosto','09':'Setembro','10':'Outubro','11':'Novembro','12':'Dezembro'};
+const ABR = {'01':'Jan','02':'Fev','03':'Mar','04':'Abr','05':'Mai','06':'Jun',
+             '07':'Jul','08':'Ago','09':'Set','10':'Out','11':'Nov','12':'Dez'};
+
+/* Quando a base cruza o ano, o rótulo carrega o ano junto. Sem isso,
+   janeiro de dois anos diferentes vira o mesmo "Jan" na tela e nada
+   distingue um do outro. */
+const mesAbr  = m => ABR[m.slice(5)] + (MULTIANO ? '/' + m.slice(2,4) : '');
+const mesNome = m => MESES[m.slice(5)] + (MULTIANO ? ' de ' + m.slice(0,4) : '');
+const ultimoDiaDoMes = m => {
+  const [a, b] = m.split('-');
+  return m + '-' + String(new Date(Number(a), Number(b), 0).getDate()).padStart(2, '0');
+};
+
+const soma = (arr) => SEL.reduce((s,i) => s + (arr[i] || 0), 0);
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html; return e; };
+
+function tabela(cols, linhas, extra){
+  const th = cols.map(c => `<th class="${c.r?'r':''} ${c.sm?'hide-sm':''}">${c.t}</th>`).join('');
+  const tr = linhas.map(l => `<tr class="${l.cls || ''}">` +
+      l.cells.map((v,k) => `<td class="${cols[k].r?'r':''} ${cols[k].sm?'hide-sm':''}">${v}</td>`).join('') + '</tr>').join('');
+  return `<div class="scroll"><table><thead><tr>${th}</tr></thead><tbody>${tr}${extra || ''}</tbody></table></div>`;
+}
+
+function barras(itens, fmt){
+  const max = Math.max(...itens.map(i => i.valor), 1);
+  return itens.map(i => `<div class="bar-row">
+      <div class="lbl">${i.rotulo}</div>
+      <div class="bar"><span style="width:${Math.max(i.valor/max*100, 1.5)}%"></span></div>
+      <div class="val">${fmt(i.valor)}</div></div>`).join('');
+}
+
+/* gráfico de barras + linha, um mês por coluna */
+function grafico(labels, barras_, linha, fmtBar, fmtLin){
+  const W = 1000, H = 250, pl = 12, pr = 12, pt = 14, pb = 28;
+  const iw = W - pl - pr, ih = H - pt - pb, n = labels.length || 1;
+  const maxB = Math.max(...barras_, 1), maxL = Math.max(...linha, 1);
+  const slot = iw / n, bw = Math.min(slot * 0.46, 60);
+  let bars = '', pts = [], dots = '', lbl = '', grid = '';
+  for (let g = 0; g <= 3; g++){
+    const y = pt + ih - (g/3)*ih;
+    grid += `<line x1="${pl}" y1="${y}" x2="${W-pr}" y2="${y}" stroke="rgba(234,229,218,.07)"/>`;
+  }
+  for (let i = 0; i < n; i++){
+    const cx = pl + slot*i + slot/2;
+    const bh = (barras_[i]/maxB) * ih, by = pt + ih - bh;
+    bars += `<rect x="${cx-bw/2}" y="${by}" width="${bw}" height="${Math.max(bh,1)}" rx="3" fill="var(--brass)" fill-opacity=".85"><title>${labels[i]}: ${fmtBar(barras_[i])}</title></rect>`;
+    const ly = pt + ih - (linha[i]/maxL) * ih;
+    pts.push(cx + ',' + ly);
+    dots += `<circle cx="${cx}" cy="${ly}" r="3.2" fill="#ece6d9"><title>${labels[i]}: ${fmtLin(linha[i])}</title></circle>`;
+    lbl += `<text x="${cx}" y="${H-8}" font-size="11" fill="#93989f" text-anchor="middle">${labels[i]}</text>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;font-family:Inter">
+    ${grid}${bars}<polyline points="${pts.join(' ')}" fill="none" stroke="#ece6d9" stroke-width="2"/>${dots}${lbl}</svg>`;
+}
+
+/* ===================== VISÃO GERAL ===================== */
+function viewVisao(){
+  const g = D.geral;
+  const atend = soma(g.map(x => x.atend)), receita = soma(g.map(x => x.receita));
+  const canc = soma(g.map(x => x.canc)), aus = soma(g.map(x => x.ausente));
+  const dias = soma(g.map(x => x.dias));
+  const clientes = D.clientes.filter(c => soma(c.visitas) > 0);
+  const novos = D.clientes.filter(c => SEL.indexOf(D.meta.meses.indexOf(c.primeira.slice(0,7))) >= 0);
+  const formas = {};
+  SEL.forEach(i => Object.keys(g[i].formas).forEach(f => formas[f] = (formas[f]||0) + g[i].formas[f]));
+
+  const kpis = [
+    {l:'Faturamento', v:brl(receita), c:'brass', s:periodoTexto()},
+    {l:'Ticket médio', v:brlc(atend ? receita/atend : 0), s:atend + ' atendimentos'},
+    {l:'Atendimentos', v:int(atend), s:dias ? (atend/dias).toFixed(1).replace('.',',') + ' por dia aberto' : ''},
+    {l:'Cancelamentos', v:int(canc), c:'burg', s:pct(canc, atend+canc) + ' da agenda'},
+    {l:'Faltas sem aviso', v:int(aus), c:'burg', s:pct(aus, atend+canc+aus) + ' da agenda'},
+    {l:'Clientes atendidos', v:int(clientes.length), s:int(novos.length) + ' na primeira visita'},
+    {l:'Receita por dia', v:brl(dias ? receita/dias : 0), s:dias + ' dias abertos'}
+  ];
+
+  let h = `<div class="section-title"><p class="eyebrow">${periodoTexto()}</p><h2>Como está o negócio</h2></div>
+    <div class="kpi-grid">${kpis.map(k => `<div class="kpi"><p class="label">${k.l}</p>
+      <p class="value num ${k.c||''}">${k.v}</p><p class="sub">${k.s||''}</p></div>`).join('')}</div>`;
+
+  h += `<div class="section-title"><p class="eyebrow">Evolução</p><h2>Faturamento e atendimentos, mês a mês</h2>
+        <p>A série completa, independente do período selecionado.</p></div>
+    <div class="card">${grafico(D.meta.meses.map(mesAbr), g.map(x => x.receita), g.map(x => x.atend), brl, int)}
+      <div style="display:flex;gap:18px;margin-top:10px;font-size:12px;color:var(--muted)">
+        <span><span style="display:inline-block;width:9px;height:9px;background:var(--brass);border-radius:2px;margin-right:6px"></span>Faturamento</span>
+        <span><span style="display:inline-block;width:9px;height:9px;background:#ece6d9;border-radius:50%;margin-right:6px"></span>Atendimentos</span>
+      </div></div>`;
+
+  const dsem = D.dias.map(d => ({ nome:d.nome, qtd:soma(d.qtd), receita:soma(d.receita) })).filter(d => d.qtd);
+  const hrs = D.horarios.map(x => ({ hora:x.hora, qtd:soma(x.qtd), receita:soma(x.receita) })).filter(x => x.qtd);
+  h += `<div class="section-title"><p class="eyebrow">Movimento</p><h2>Quando a barbearia fatura</h2></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px">
+      <div class="card"><h3>Por dia da semana</h3>${barras(dsem.map(d => ({rotulo:d.nome, valor:d.receita})), brl)}</div>
+      <div class="card"><h3>Por horário</h3>${barras(hrs.map(x => ({rotulo:x.hora + 'h', valor:x.receita})), brl)}</div>
+    </div>`;
+
+  const totalF = Object.keys(formas).reduce((s,k) => s + formas[k], 0);
+  const semInfo = formas['Não informado'] || 0;
+  h += `<div class="section-title"><p class="eyebrow">Recebimento</p><h2>Formas de pagamento</h2></div>
+    <div class="card">${barras(Object.keys(formas).sort((a,b) => formas[b]-formas[a])
+        .map(k => ({rotulo:k, valor:formas[k]})), v => brl(v) + '  ·  ' + pct(v, totalF))}
+      ${semInfo/totalF > 0.2 ? `<p class="nota">${pct(semInfo,totalF)} do faturamento do período está sem forma de pagamento registrada. Enquanto o campo não for preenchido no aplicativo, essa divisão fica incompleta.</p>` : ''}</div>`;
+  return h;
+}
+
+/* ===================== DRE ===================== */
+function viewDRE(){
+  if (!D.dre.length) return '<div class="card"><p class="vazio">A aba DRE não foi encontrada na planilha.</p></div>';
+
+  let cols = SEL.slice().sort((a,b) => a-b);
+  const anosSel = Array.from(new Set(cols.map(i => D.meta.meses[i].slice(0,4)))).sort();
+  let aviso = '';
+
+  /* A aba DRE tem uma coluna por mês e nenhuma por ano. Se a seleção
+     cruza a virada, janeiro de dois anos aponta para a mesma coluna e a
+     tela mostra o número errado sem avisar. Restringe ao ano mais recente
+     e diz isso na tela. */
+  if (anosSel.length > 1){
+    const ano = anosSel[anosSel.length-1];
+    cols = cols.filter(i => D.meta.meses[i].slice(0,4) === ano);
+    aviso = `<p class="nota topo">A aba DRE da planilha tem uma coluna por mês, sem o ano, então
+      ${mesNome(D.meta.meses[cols[0]]).split(' de ')[0].toLowerCase()} de ${anosSel[0]} e de ${ano} cairiam na mesma coluna.
+      Enquanto a planilha não separar os anos, esta aba mostra apenas ${ano}. As outras abas do painel continuam
+      somando o período inteiro que você selecionou.</p>`;
+  }
+  if (!cols.length) return '<div class="card"><p class="vazio">Selecione ao menos um mês para ver a DRE.</p></div>';
+
+  let h = `<div class="section-title"><p class="eyebrow">Demonstrativo de resultado</p><h2>DRE</h2>
+    <p>Uma coluna por mês selecionado, mais o total do período. Os valores vêm da aba DRE da planilha.</p></div>
+    <div class="card">${aviso}<div class="scroll"><table><thead><tr><th>Descrição</th>` +
+    cols.map(i => `<th class="r">${mesAbr(D.meta.meses[i])}</th>`).join('') +
+    `<th class="r">Período</th></tr></thead><tbody>`;
+
+  D.dre.forEach(l => {
+    if (/DEMONSTRATIVO|DESCRI|Índice Sazonal/i.test(l.rotulo)) return;
+    const vals = cols.map(i => l.valores[Number(D.meta.meses[i].slice(5)) - 1]);
+    const tem = vals.some(v => typeof v === 'number' && v !== 0);
+    const secao = !l.tem;
+    if (!secao && !tem) return;
+    const total = vals.reduce((s,v) => s + (typeof v === 'number' ? v : 0), 0);
+    const eTotal = /^\s*\(\s*=|total/i.test(l.rotulo);
+    const margem = /margem/i.test(l.rotulo);
+    const fmt = v => typeof v !== 'number' ? '—' : (margem ? (v*100).toFixed(1).replace('.',',') + '%' : brl(v));
+    h += `<tr class="${secao ? 'dre-sec' : eTotal ? 'dre-tot' : l.nivel > 1 ? 'n2' : 'dre-lin'}">
+      <td>${l.rotulo.trim()}</td>` +
+      vals.map(v => `<td class="r num">${secao ? '' : fmt(v)}</td>`).join('') +
+      `<td class="r num">${secao ? '' : (margem ? '—' : brl(total))}</td></tr>`;
+  });
+  return h + '</tbody></table></div></div>';
+}
+
+/* ===================== DESPESAS ===================== */
+function viewDespesas(){
+  if (!D.despesas.length) return '<div class="card"><p class="vazio">Nenhuma despesa encontrada para este período.</p></div>';
+  const cats = D.despesas.map(d => ({ categoria:d.categoria, valor:soma(d.valor), itens:d.itens }))
+                         .filter(d => d.valor > 0).sort((a,b) => b.valor - a.valor);
+  const total = cats.reduce((s,c) => s + c.valor, 0);
+  const receita = soma(D.geral.map(x => x.receita));
+  const comissao = receita * COMISSAO / 100;
+  const sobra = receita - comissao - total;
+
+  /* Se a comissão já está lançada como despesa, a sobra subtrai duas vezes
+     e o resultado aparece pior do que é. Não dá para adivinhar qual das
+     duas é a verdadeira, então o painel aponta a suspeita em vez de
+     escolher sozinho. */
+  const suspeita = cats.filter(c => /comiss|repasse|barbeiro|sal[áa]rio|pr[óo].?labore/i.test(c.categoria));
+
+  let h = `<div class="section-title"><p class="eyebrow">${periodoTexto()}</p><h2>Despesas</h2></div>
+    <div class="kpi-grid">
+      <div class="kpi"><p class="label">Total de despesas</p><p class="value num burg">${brl(total)}</p><p class="sub">${cats.length} categorias</p></div>
+      <div class="kpi"><p class="label">Comissão estimada</p><p class="value num">${brl(comissao)}</p><p class="sub">${COMISSAO}% do faturamento</p></div>
+      <div class="kpi"><p class="label">Sobra</p><p class="value num ${sobra >= 0 ? 'sage' : 'burg'}">${brl(sobra)}</p><p class="sub">${pct(sobra, receita)} do faturamento</p></div>
+      <div class="kpi"><p class="label">Despesa por dia aberto</p><p class="value num">${brl(total / Math.max(soma(D.geral.map(x => x.dias)),1))}</p><p class="sub">sem contar comissão</p></div>
+    </div>
+    ${suspeita.length ? `<p class="nota">A sobra desconta a comissão estimada (${COMISSAO}% do faturamento) e também
+      ${suspeita.length === 1 ? 'a categoria' : 'as categorias'} <b>${suspeita.map(s => s.categoria).join('</b>, <b>')}</b>,
+      que somam ${brl(suspeita.reduce((s,c) => s + c.valor, 0))} no período. Se esse lançamento já é o pagamento da equipe,
+      o valor está sendo subtraído duas vezes e a sobra real é maior do que aparece aqui.
+      Ignorando a estimativa, a sobra seria ${brl(receita - total)}.</p>` : ''}
+    <div class="card" style="margin-top:16px"><h3>Por categoria</h3>${barras(
+      cats.map(c => ({rotulo:c.categoria, valor:c.valor})), v => brl(v) + '  ·  ' + pct(v,total))}</div>`;
+
+  const mesesSel = SEL.map(i => D.meta.meses[i]);
+  const itens = [].concat.apply([], D.despesas.map(d => d.itens.map(i => Object.assign({cat:d.categoria}, i))))
+    .filter(i => mesesSel.indexOf(i.mes) >= 0).sort((a,b) => (b.data || '') < (a.data || '') ? -1 : 1);
+  h += `<div class="card"><h3>Lançamentos do período</h3>` + tabela(
+    [{t:'Data'},{t:'Descrição'},{t:'Categoria',sm:1},{t:'Valor',r:1}],
+    itens.map(i => ({cells:[
+      i.data ? dtf(i.data) : mesNome(i.mes),
+      i.desc || '—',
+      `<span style="color:var(--muted)">${i.cat}</span>`,
+      `<span class="num">${brl(i.valor)}</span>`]})),
+    `<tr class="total"><td colspan="3">Total</td><td class="r num">${brl(total)}</td></tr>`) + '</div>';
+  return h;
+}
+
+/* ===================== EQUIPE ===================== */
+function viewEquipe(){
+  const eq = D.equipe.map(e => {
+    const at = soma(e.atend), cn = soma(e.canc), rc = soma(e.receita), di = soma(e.dias);
+    return { prof:e.prof, atend:at, canc:cn, receita:rc, dias:di,
+             ticket: at ? rc/at : 0, taxa: (at+cn) ? cn/(at+cn)*100 : 0,
+             porDia: di ? at/di : 0, maior: Math.max(...SEL.map(i => e.maior[i])), ref:e };
+  }).filter(e => e.atend + e.canc > 0).sort((a,b) => b.receita - a.receita);
+  const totR = eq.reduce((s,e) => s + e.receita, 0);
+  const totA = eq.reduce((s,e) => s + e.atend, 0);
+  const totC = eq.reduce((s,e) => s + e.canc, 0);
+  const medalha = ['🥇','🥈','🥉'];
+
+  let h = `<div class="section-title"><p class="eyebrow">${periodoTexto()}</p><h2>Ranking de profissionais</h2></div>
+    <div class="card">` + tabela(
+    [{t:'#'},{t:'Profissional'},{t:'Atendimentos',r:1},{t:'Faturamento',r:1},{t:'Ticket médio',r:1},
+     {t:'% do total',r:1,sm:1},{t:'Cancelados',r:1,sm:1},{t:'Taxa cancel.',r:1},{t:'Comissão est.',r:1}],
+    eq.map((e,i) => ({cells:[
+      medalha[i] || (i+1),
+      e.prof,
+      `<span class="num">${int(e.atend)}</span>`,
+      `<span class="num">${brl(e.receita)}</span>`,
+      `<span class="num">${brlc(e.ticket)}</span>`,
+      `<span class="num">${pct(e.receita, totR)}</span>`,
+      `<span class="num">${int(e.canc)}</span>`,
+      `<span class="flag ${e.taxa>30?'f-bad':e.taxa>15?'f-mid':'f-ok'}">${e.taxa.toFixed(1).replace('.',',')}%</span>`,
+      `<span class="num">${brl(e.receita * COMISSAO / 100)}</span>`]})),
+    `<tr class="total"><td></td><td>Total</td><td class="r num">${int(totA)}</td><td class="r num">${brl(totR)}</td>
+     <td class="r num">${brlc(totA ? totR/totA : 0)}</td><td class="r hide-sm"></td>
+     <td class="r num hide-sm">${int(totC)}</td>
+     <td class="r num">${(totA+totC ? (totC/(totA+totC))*100 : 0).toFixed(1).replace('.',',')}%</td>
+     <td class="r num">${brl(totR * COMISSAO / 100)}</td></tr>`) +
+    `<div style="display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap">
+       <span style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700">Taxa de comissão</span>
+       <input class="inp num" type="number" id="com-input" min="0" max="70" step="1" value="${COMISSAO}">
+       <span style="color:var(--muted);font-size:13px">% do faturamento. Mude aqui quando o modelo mudar.</span>
+     </div></div>`;
+
+  h += `<div class="section-title"><p class="eyebrow">Produtividade</p><h2>Análise por profissional</h2>
+    <p>Dias trabalhados contam os dias em que a pessoa realizou ao menos um atendimento.</p></div>
+    <div class="card">` + tabela(
+    [{t:'Profissional'},{t:'Dias trabalhados',r:1},{t:'Atend. por dia',r:1},{t:'Receita por dia',r:1},
+     {t:'Maior venda',r:1,sm:1},{t:'Clientes atendidos',r:1,sm:1}],
+    eq.map(e => {
+      const cl = D.clientes.filter(c => c.prof === e.prof && soma(c.visitas) > 0).length;
+      return {cells:[
+        e.prof,
+        `<span class="num">${int(e.dias)}</span>`,
+        `<span class="num">${e.porDia.toFixed(1).replace('.',',')}</span>`,
+        `<span class="num">${brl(e.dias ? e.receita/e.dias : 0)}</span>`,
+        `<span class="num">${brl(e.maior)}</span>`,
+        `<span class="num">${int(cl)}</span>`]};})) + '</div>';
+
+  const linhas = [
+    {tit:'Faturamento por mês', get:(e,i) => e.receita[i], fmt:brl},
+    {tit:'Atendimentos por mês', get:(e,i) => e.atend[i], fmt:int},
+    {tit:'Ticket médio por mês', get:(e,i) => e.atend[i] ? e.receita[i]/e.atend[i] : 0, fmt:brlc}
+  ];
+  h += `<div class="section-title"><p class="eyebrow">Evolução mensal</p><h2>Série completa por profissional</h2>
+        <p>A série inteira, independente do período selecionado, para enxergar entrada e saída de gente.</p></div>`;
+  linhas.forEach(bl => {
+    h += `<div class="card"><h3>${bl.tit}</h3>` + tabela(
+      [{t:'Profissional'}].concat(D.meta.meses.map(m => ({t:mesAbr(m), r:1}))),
+      D.equipe.map(e => ({cells:[e.prof].concat(D.meta.meses.map((m,i) => {
+        const v = bl.get(e, i);
+        return `<span class="num" ${v ? '' : 'style="color:var(--border-strong)"'}>${v ? bl.fmt(v) : '—'}</span>`;
+      }))}))) + '</div>';
+  });
+  return h;
+}
+
+/* ===================== SERVIÇOS ===================== */
+function viewServicos(){
+  const sv = D.servicos.map(s => ({ servico:s.servico, qtd:soma(s.qtd), receita:soma(s.receita) }))
+                       .filter(s => s.qtd > 0).sort((a,b) => b.receita - a.receita);
+  if (!sv.length) return '<div class="card"><p class="vazio">Nenhum serviço realizado no período selecionado.</p></div>';
+  const totR = sv.reduce((s,x) => s + x.receita, 0), totQ = sv.reduce((s,x) => s + x.qtd, 0);
+  return `<div class="section-title"><p class="eyebrow">${periodoTexto()}</p><h2>Ranking de serviços</h2>
+    <p>${sv.length} serviços diferentes no período. Os dez primeiros respondem por ${pct(sv.slice(0,10).reduce((s,x)=>s+x.receita,0), totR)} do faturamento.</p></div>
+    <div class="card">` + tabela(
+    [{t:'#'},{t:'Serviço'},{t:'Quantidade',r:1},{t:'Faturamento',r:1},{t:'Ticket médio',r:1},
+     {t:'% do faturamento',r:1,sm:1},{t:'',sm:1}],
+    sv.map((s,i) => ({cells:[
+      i+1,
+      `<span class="cap">${s.servico}</span>`,
+      `<span class="num">${int(s.qtd)}</span>`,
+      `<span class="num">${brl(s.receita)}</span>`,
+      `<span class="num">${brlc(s.receita/s.qtd)}</span>`,
+      `<span class="num">${pct(s.receita, totR)}</span>`,
+      `<div class="bar"><span style="width:${Math.max(s.receita/sv[0].receita*100,1.5)}%"></span></div>`]})),
+    `<tr class="total"><td></td><td>Total</td><td class="r num">${int(totQ)}</td><td class="r num">${brl(totR)}</td>
+     <td class="r num">${brlc(totQ ? totR/totQ : 0)}</td><td class="r hide-sm"></td><td class="hide-sm"></td></tr>`) + '</div>';
+}
+
+/* ===================== CLIENTES ===================== */
+function viewClientes(){
+  const mesesSel = SEL.map(i => D.meta.meses[i]).sort();
+  const fim = mesesSel[mesesSel.length-1];
+  /* o mês parcial mais recente usa a data real da última leitura;
+     mês fechado usa o último dia real dele, não o dia 28 fixo, que
+     deslocava até três dias a conta de "sem vir há" */
+  const ref = fim === D.meta.meses[D.meta.meses.length-1] ? D.meta.ref : ultimoDiaDoMes(fim);
+  const dias = (a,b) => Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00'))/86400000);
+
+  const ativos = D.clientes.map(c => ({...c, v:soma(c.visitas), r:soma(c.receita)})).filter(c => c.v > 0);
+  const novos = ativos.filter(c => mesesSel.indexOf(c.primeira.slice(0,7)) >= 0);
+  const rec = ativos.filter(c => c.v >= 2);
+  const uma = ativos.filter(c => c.v === 1);
+  const totR = ativos.reduce((s,c) => s + c.r, 0);
+  const recR = rec.reduce((s,c) => s + c.r, 0);
+  const novosVoltaram = novos.filter(c => c.v >= 2);
+
+  let h = `<div class="section-title"><p class="eyebrow">${periodoTexto()}</p><h2>Base de clientes</h2></div>
+    <div class="kpi-grid">
+      <div class="kpi"><p class="label">Clientes atendidos</p><p class="value num brass">${int(ativos.length)}</p><p class="sub">${(ativos.reduce((s,c)=>s+c.v,0)/Math.max(ativos.length,1)).toFixed(1).replace('.',',')} visitas por cliente</p></div>
+      <div class="kpi"><p class="label">Primeira visita no período</p><p class="value num">${int(novos.length)}</p><p class="sub">${pct(novos.length, ativos.length)} da base do período</p></div>
+      <div class="kpi"><p class="label">Voltaram no período</p><p class="value num sage">${int(rec.length)}</p><p class="sub">${pct(recR, totR)} do faturamento</p></div>
+      <div class="kpi"><p class="label">Vieram uma vez só</p><p class="value num burg">${int(uma.length)}</p><p class="sub">${pct(uma.length, ativos.length)} da base</p></div>
+      <div class="kpi"><p class="label">Ticket por cliente</p><p class="value num">${brlc(ativos.length ? totR/ativos.length : 0)}</p><p class="sub">no período todo</p></div>
+      <div class="kpi"><p class="label">Retorno dos novos</p><p class="value num">${pct(novosVoltaram.length, novos.length)}</p><p class="sub">${int(novosVoltaram.length)} de ${int(novos.length)} voltaram</p></div>
+    </div>` + (SEL.indexOf(0) >= 0 ?
+      `<p class="nota">O histórico começa em ${mesNome(D.meta.meses[0]).toLowerCase()}, então quem já era cliente antes disso aparece aqui como primeira visita. Para medir captação de verdade, selecione um período que não inclua o primeiro mês.</p>` : '');
+
+  const faixas = [{r:'1 visita',min:1,max:1},{r:'2 visitas',min:2,max:2},{r:'3 visitas',min:3,max:3},
+                  {r:'4 a 5 visitas',min:4,max:5},{r:'6 ou mais',min:6,max:999}];
+  h += `<div class="section-title"><p class="eyebrow">Frequência</p><h2>Quantas vezes cada cliente veio</h2></div>
+    <div class="card">` + tabela(
+    [{t:'Faixa'},{t:'Clientes',r:1},{t:'% da base',r:1},{t:'Faturamento',r:1},{t:'% do faturamento',r:1,sm:1},{t:'Ticket por cliente',r:1,sm:1}],
+    faixas.map(f => {
+      const g = ativos.filter(c => c.v >= f.min && c.v <= f.max);
+      const rr = g.reduce((s,c) => s + c.r, 0);
+      return {cells:[f.r,
+        `<span class="num">${int(g.length)}</span>`,
+        `<span class="num">${pct(g.length, ativos.length)}</span>`,
+        `<span class="num">${brl(rr)}</span>`,
+        `<span class="num">${pct(rr, totR)}</span>`,
+        `<span class="num">${brlc(g.length ? rr/g.length : 0)}</span>`]};})) + '</div>';
+
+  /* situação com base na última visita.
+     O ciclo e a janela vêm do motor, os mesmos que a página de
+     oportunidades usa. Antes estavam cravados aqui em 17 dias, e as duas
+     telas classificavam o mesmo cliente por réguas diferentes. */
+  const ciclo = D.meta.ciclo;
+  /* Cada cliente é medido pelo próprio ritmo: quem tem três visitas ou mais
+     carrega o ciclo dele, quem tem menos histórico usa o da casa. É a mesma
+     régua da página de oportunidades. */
+  const cicloDe = c => (c.visitas_hist >= 3 && c.ciclo_cli) ? c.ciclo_cli : ciclo;
+  const atraso = c => dias(c.ultima, ref) / cicloDe(c);
+  const sit = [
+    {r:'Em dia', cor:'f-ok', crit:'até 2 ciclos dele', f:c => atraso(c) <= 2},
+    {r:'Atrasado', cor:'f-mid', crit:'entre 2 e 5 ciclos', f:c => atraso(c) > 2 && atraso(c) <= 5},
+    {r:'Perdido', cor:'f-bad', crit:'mais de 5 ciclos', f:c => atraso(c) > 5}
+  ];
+  h += `<div class="section-title"><p class="eyebrow">Situação</p><h2>Quem está em dia e quem sumiu</h2>
+        <p>Considerando a última visita de cada cliente até ${dtf(ref)}. Cada um é comparado com o próprio hábito:
+           quem vem a cada duas semanas está atrasado no dia 28, quem vem a cada dois meses só no dia 120.
+           Quem tem menos de três visitas usa o ciclo da casa, de ${ciclo} dias. É a mesma régua da página de oportunidades.</p></div>
+    <div class="card">` + tabela(
+    [{t:'Situação'},{t:'Critério',sm:1},{t:'Clientes',r:1},{t:'% da base',r:1},{t:'Receita histórica',r:1}],
+    sit.map(s => {
+      const g = ativos.filter(s.f);
+      return {cells:[`<span class="flag ${s.cor}">${s.r}</span>`,
+        `<span style="color:var(--muted)">${s.crit}</span>`,
+        `<span class="num">${int(g.length)}</span>`,
+        `<span class="num">${pct(g.length, ativos.length)}</span>`,
+        `<span class="num">${brl(g.reduce((s2,c) => s2 + c.r, 0))}</span>`]};})) + '</div>';
+
+  const top = ativos.slice().sort((a,b) => b.r - a.r).slice(0, 25);
+  h += `<div class="section-title"><p class="eyebrow">Carteira</p><h2>Os 25 clientes que mais gastaram</h2></div>
+    <div class="card">` + tabela(
+    [{t:'#'},{t:'Cliente'},{t:'WhatsApp',sm:1},{t:'Atende com',sm:1},{t:'Visitas',r:1},{t:'Volta a cada',r:1,sm:1},{t:'Ticket',r:1,sm:1},{t:'Última visita',r:1},{t:'Total gasto',r:1}],
+    top.map((c,i) => ({cells:[
+      i+1, c.nome,
+      `<span class="fone">${c.fone}</span>`,
+      `<span style="color:var(--muted)">${c.prof}</span>`,
+      `<span class="num">${int(c.v)}</span>`,
+      `<span class="num">${c.ciclo_cli ? Math.round(c.ciclo_cli) + ' dias' : '—'}</span>`,
+      `<span class="num">${brlc(c.r/c.v)}</span>`,
+      `<span class="num">${dtf(c.ultima)}</span>`,
+      `<span class="num" style="color:var(--brass)">${brl(c.r)}</span>`]}))) + '</div>';
+  return h;
+}
+
+/* ===================== controles ===================== */
+function periodoTexto(){
+  if (!SEL.length) return 'Nenhum mês selecionado';
+  const s = SEL.slice().sort((a,b) => a-b).map(i => D.meta.meses[i]);
+  if (s.length === 1) return mesNome(s[0]);
+  if (s.length === D.meta.meses.length) return 'Todo o período';
+  return mesNome(s[0]) + ' a ' + mesNome(s[s.length-1]);
+}
+
+function renderChips(){
+  const c = document.getElementById('chips');
+  /* separador visual entre anos, para o olho não precisar ler o sufixo */
+  c.innerHTML = D.meta.meses.map((m,i) => {
+    const virou = i > 0 && m.slice(0,4) !== D.meta.meses[i-1].slice(0,4);
+    return (virou ? '<span class="sep"></span>' : '') +
+      `<button data-mes="${i}" class="${SEL.indexOf(i) >= 0 ? 'on' : ''}">${mesAbr(m)}</button>`;
+  }).join('');
+}
+
+function render(){
+  renderChips();
+  const ativa = document.querySelector('nav.tabs button.active').dataset.view;
+  const mapa = { visao:viewVisao, dre:viewDRE, despesas:viewDespesas,
+                 equipe:viewEquipe, servicos:viewServicos, clientes:viewClientes };
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  const alvo = document.getElementById('view-' + ativa);
+  try {
+    alvo.innerHTML = SEL.length ? mapa[ativa]() : '<div class="card"><p class="vazio">Selecione ao menos um mês no período acima.</p></div>';
+  } catch (err){
+    alvo.innerHTML = `<div class="estado erro"><h3>Não consegui montar esta aba</h3>
+      <p>As outras continuam funcionando. Detalhe técnico: ${String(err.message || err)}</p></div>`;
+  }
+  alvo.classList.add('active');
+  const inp = document.getElementById('com-input');
+  if (inp) inp.addEventListener('input', e => {
+    COMISSAO = Math.min(Math.max(parseFloat(e.target.value) || 0, 0), 100);
+    const pos = e.target.selectionStart; render();
+    const novo = document.getElementById('com-input');
+    if (novo){ novo.focus(); novo.setSelectionRange(pos, pos); }
+  });
+}
+
+document.getElementById('tabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('nav.tabs button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); render();
+});
+
+document.getElementById('chips').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const i = Number(b.dataset.mes), p = SEL.indexOf(i);
+  if (p >= 0){ if (SEL.length > 1) SEL.splice(p, 1); } else SEL.push(i);
+  render();
+});
+
+document.querySelector('.atalhos').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const n = D.meta.meses.length;
+  if (b.dataset.atalho === 'ultimo') SEL = [n-1];
+  if (b.dataset.atalho === 'tres') SEL = [n-3, n-2, n-1].filter(i => i >= 0);
+  if (b.dataset.atalho === 'tudo') SEL = D.meta.meses.map((_,i) => i);
+  render();
+});
+
+function falhar(t, d){
+  const e = document.getElementById('estado');
+  e.className = 'estado erro'; e.innerHTML = `<h3>${t}</h3><p>${d}</p>`;
+}
+
+function textoIgnorados(){
+  const ig = (D.meta && D.meta.ignorados) || {};
+  const chaves = Object.keys(ig);
+  if (!chaves.length) return '';
+  const n = chaves.reduce((s,k) => s + ig[k], 0);
+  const meses = Array.from(new Set(chaves.map(k => k.split('|')[0]))).sort();
+  return `${n} ${n === 1 ? 'registro caiu' : 'registros caíram'} fora do período de operação ` +
+         `(${meses.join(', ')}) e ${n === 1 ? 'foi ignorado' : 'foram ignorados'}: são linhas sem nenhum ` +
+         `atendimento realizado no mês, quase sempre bloqueio de agenda lançado com repetição. ` +
+         `Rode a função sanidade() no Apps Script para ver o que são.`;
+}
+
+async function carregar(){
+  try {
+    const r = await fetch(CONFIG.APPS_SCRIPT_URL + '?token=' + encodeURIComponent(CONFIG.TOKEN) + '&modo=painel');
+    if (!r.ok) throw new Error('resposta ' + r.status);
+    const dados = await r.json();
+    if (dados.erro) return falhar('A planilha respondeu com erro', dados.erro);
+    D = dados;
+    MULTIANO = (D.meta.anos || []).length > 1;
+    SEL = D.meta.meses.map((_,i) => i);
+    document.getElementById('estado').classList.add('hidden');
+    document.getElementById('periodo').classList.remove('hidden');
+    document.getElementById('ref').innerHTML = 'Dados até <b>' + dtf(D.meta.ref) + '</b>';
+    document.getElementById('rodape').innerHTML =
+      'Todos os números são calculados a partir da aba de atendimentos e da aba de despesas, no momento em que você abre a página. ' +
+      'Trocar o período recalcula na hora, sem mexer na planilha. A DRE vem da aba DRE. ' +
+      'Os meses do seletor são os que tiveram pelo menos um atendimento realizado. ' +
+      textoIgnorados() + ' ' +
+      'Última leitura em ' + D.meta.gerado_em + '.';
+    render();
+  } catch (err){
+    falhar('Não consegui ler a planilha',
+      'Confira se a implantação está publicada e se o token confere. Detalhe: ' + err.message);
+  }
+}
+carregar();
+</script>
+</body>
+</html>
